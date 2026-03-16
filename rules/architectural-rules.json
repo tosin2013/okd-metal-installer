@@ -1,0 +1,101 @@
+{
+  "metadata": {
+    "version": "1.0.0",
+    "description": "Architectural rules for OKD-Metal installer, extracted from ADRs",
+    "created": "2026-03-16",
+    "author": "MCP ADR Analysis Server",
+    "tags": ["ansible", "okd", "bare-metal", "provisioning"]
+  },
+  "rules": [
+    {
+      "id": "ARCH-001",
+      "name": "Ansible-First Orchestration",
+      "description": "All provisioning workflows must be implemented as Ansible playbooks and roles. No standalone API services or custom orchestration daemons.",
+      "category": "architectural",
+      "severity": "critical",
+      "sourceAdr": "001-use-ansible-as-primary-automation-framework",
+      "validation": "All automation files must be .yml Ansible playbooks or role structures"
+    },
+    {
+      "id": "ARCH-002",
+      "name": "Ansible Collection Structure",
+      "description": "The project must follow Ansible collection layout: roles/, playbooks/, inventory/, group_vars/, host_vars/, files/, templates/",
+      "category": "architectural",
+      "severity": "high",
+      "sourceAdr": "001-use-ansible-as-primary-automation-framework",
+      "validation": "Directory structure must contain required Ansible directories"
+    },
+    {
+      "id": "ARCH-003",
+      "name": "Inventory-Driven Topology",
+      "description": "Cluster topology (SNO, compact, HA) must be auto-detected from Ansible inventory host counts and role assignments. No separate topology configuration parameter.",
+      "category": "architectural",
+      "severity": "high",
+      "sourceAdr": "006-flexible-cluster-topology-support",
+      "validation": "Topology detection logic must exist in ignition_generate role"
+    },
+    {
+      "id": "SEC-001",
+      "name": "Credential Isolation",
+      "description": "All secrets (AWS credentials, pull secrets, SSH keys) must be managed via Ansible Vault or environment variables. Never store secrets in plain text in inventory or var files.",
+      "category": "security",
+      "severity": "critical",
+      "sourceAdr": "004-route53-dns-integration",
+      "validation": "No plain text secrets in any committed files"
+    },
+    {
+      "id": "SEC-002",
+      "name": "Ignition Config Security",
+      "description": "Ignition configuration files must have 0600 permissions and be served over time-limited HTTP or HTTPS only.",
+      "category": "security",
+      "severity": "critical",
+      "sourceAdr": "010-ignition-configuration-generation",
+      "validation": "File permissions and serving configuration must enforce security"
+    },
+    {
+      "id": "TECH-001",
+      "name": "CoreOS Variant Explicit Selection",
+      "description": "The target OS (FCOS or SCOS) must be an explicit configuration variable, never auto-detected or assumed.",
+      "category": "technology",
+      "severity": "high",
+      "sourceAdr": "008-fcos-scos-dual-os-compatibility",
+      "validation": "coreos_variant variable must be defined in group_vars/all.yml"
+    },
+    {
+      "id": "TECH-002",
+      "name": "Disconnected-First Design",
+      "description": "All roles must function without internet access when disconnected=true. No hardcoded external URLs without fallback to local paths.",
+      "category": "technology",
+      "severity": "high",
+      "sourceAdr": "009-disconnected-airgapped-installation-support",
+      "validation": "All URL references must be configurable with local alternatives"
+    },
+    {
+      "id": "TECH-003",
+      "name": "ISO Customization via coreos-installer",
+      "description": "Boot media customization must use coreos-installer iso customize. No manual ISO manipulation or third-party ISO tools.",
+      "category": "technology",
+      "severity": "high",
+      "sourceAdr": "002-custom-discovery-agent-and-boot-media",
+      "validation": "ISO tasks must invoke coreos-installer"
+    },
+    {
+      "id": "PROC-001",
+      "name": "Pre-flight Validation",
+      "description": "Every deployment playbook must include pre-flight checks that validate compatibility between OS variant, ISO version, openshift-install version, and cluster topology.",
+      "category": "process",
+      "severity": "high",
+      "sourceAdr": "008-fcos-scos-dual-os-compatibility",
+      "validation": "Pre-flight role must be included in all deployment playbooks"
+    },
+    {
+      "id": "PROC-002",
+      "name": "Idempotent Operations",
+      "description": "All Ansible roles must be idempotent -- safe to re-run without side effects. Use Ansible modules with state management rather than raw shell commands where possible.",
+      "category": "process",
+      "severity": "high",
+      "sourceAdr": "001-use-ansible-as-primary-automation-framework",
+      "validation": "Roles must use Ansible modules over shell/command where feasible"
+    }
+  ]
+}
