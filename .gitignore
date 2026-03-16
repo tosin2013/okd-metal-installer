@@ -1,0 +1,32 @@
+# Ansible
+*.retry
+*.pyc
+__pycache__/
+
+# MCP server cache
+.mcp-adr-cache/
+.mcp-server-context.md
+
+# Secrets (never commit)
+*.vault
+vault_password_file
+pull-secret.json
+pull-secret.txt
+kubeconfig
+auth/
+
+# Generated artifacts
+*.iso
+*.ign
+install-config.yaml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~

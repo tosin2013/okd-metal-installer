@@ -1,0 +1,15 @@
+---
+cluster_name: okd-metal
+base_domain: example.com
+
+# CoreOS variant: fcos or scos (ADR-008)
+coreos_variant: scos
+
+# Disconnected mode (ADR-009)
+disconnected: false
+
+# VNC configuration (ADR-007)
+vnc_display: 1
+vnc_port: 5901
+vnc_geometry: "1920x1080"
+vnc_user: root

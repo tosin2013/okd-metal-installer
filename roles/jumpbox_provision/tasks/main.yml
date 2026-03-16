@@ -1,0 +1,93 @@
+---
+- name: Enable CRB repository (provides X11 build dependencies)
+  ansible.builtin.command:
+    cmd: dnf config-manager --set-enabled crb
+  changed_when: true
+
+- name: Ensure COPR repo for RHEL 10 desktop packages is enabled
+  ansible.builtin.command:
+    cmd: "dnf copr enable {{ copr_repo_name }} rhel+epel-10-x86_64 -y"
+  args:
+    creates: /etc/yum.repos.d/_copr:copr.fedorainfracloud.org:yxwang5db2:go-rhel-10.repo
+  changed_when: true
+
+- name: Install firewalld
+  ansible.builtin.dnf:
+    name: firewalld
+    state: present
+
+- name: Enable and start firewalld
+  ansible.builtin.systemd:
+    name: firewalld
+    state: started
+    enabled: true
+
+- name: Ensure SSH access is preserved in firewall
+  ansible.posix.firewalld:
+    service: ssh
+    permanent: true
+    immediate: true
+    state: enabled
+
+- name: Install Xfce desktop and TigerVNC
+  ansible.builtin.dnf:
+    name: "{{ jumpbox_packages }}"
+    state: present
+  register: desktop_install
+
+- name: Create VNC config directory
+  ansible.builtin.file:
+    path: "{{ vnc_home }}/.vnc"
+    state: directory
+    owner: "{{ vnc_user }}"
+    mode: "0755"
+
+- name: Set VNC password
+  ansible.builtin.shell:
+    cmd: "echo '{{ vnc_password }}' | vncpasswd -f > {{ vnc_home }}/.vnc/passwd"
+  args:
+    creates: "{{ vnc_home }}/.vnc/passwd"
+  when: vnc_password is defined
+  no_log: true
+
+- name: Set VNC password permissions
+  ansible.builtin.file:
+    path: "{{ vnc_home }}/.vnc/passwd"
+    owner: "{{ vnc_user }}"
+    mode: "0600"
+  when: vnc_password is defined
+
+- name: Configure VNC server
+  ansible.builtin.copy:
+    dest: "{{ vnc_home }}/.vnc/config"
+    owner: "{{ vnc_user }}"
+    mode: "0644"
+    content: |
+      session=xfce
+      geometry={{ vnc_geometry }}
+      alwaysshared
+  notify: Restart vncserver
+
+- name: Configure TigerVNC user mapping
+  ansible.builtin.lineinfile:
+    path: /etc/tigervnc/vncserver.users
+    regexp: "^:{{ vnc_display }}="
+    line: ":{{ vnc_display }}={{ vnc_user }}"
+    create: true
+    mode: "0644"
+  notify: Restart vncserver
+
+- name: Open VNC port in firewall
+  ansible.posix.firewalld:
+    port: "{{ item }}"
+    permanent: true
+    immediate: true
+    state: enabled
+  loop: "{{ firewall_open_ports }}"
+
+- name: Enable and start VNC service
+  ansible.builtin.systemd:
+    name: "vncserver@:{{ vnc_display }}"
+    state: started
+    enabled: true
+    daemon_reload: true

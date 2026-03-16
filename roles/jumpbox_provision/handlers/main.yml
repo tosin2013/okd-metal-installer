@@ -1,0 +1,11 @@
+---
+- name: Reload firewalld
+  ansible.builtin.systemd:
+    name: firewalld
+    state: reloaded
+
+- name: Restart vncserver
+  ansible.builtin.systemd:
+    name: "vncserver@:{{ vnc_display }}"
+    state: restarted
+    daemon_reload: true

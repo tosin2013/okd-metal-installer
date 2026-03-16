@@ -1,0 +1,6 @@
+---
+- name: Provision jumpbox with VNC and development tools
+  hosts: jumpbox
+  become: true
+  roles:
+    - jumpbox_provision

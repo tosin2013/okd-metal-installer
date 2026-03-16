@@ -1,0 +1,19 @@
+---
+vnc_display: 1
+vnc_port: 5901
+vnc_geometry: "1920x1080"
+vnc_user: root
+vnc_home: "/{{ 'root' if vnc_user == 'root' else 'home/' + vnc_user }}"
+
+copr_repo_name: yxwang5db2/go-rhel-10
+copr_repo_id: "copr:copr.fedorainfracloud.org:yxwang5db2:go-rhel-10"
+
+firewall_open_ports:
+  - "{{ vnc_port }}/tcp"
+
+jumpbox_packages:
+  - tigervnc-server
+  - xfce4-desktop
+  - firewalld
+  - firefox
+  - xterm
