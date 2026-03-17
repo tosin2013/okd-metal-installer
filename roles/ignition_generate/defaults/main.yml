@@ -1,0 +1,16 @@
+---
+openshift_install_binary: openshift-install
+ignition_output_dir: "{{ playbook_dir }}/../ignition-output"
+ignition_work_dir: "{{ playbook_dir }}/../.ignition-work"
+
+pull_secret_path: "{{ playbook_dir }}/../pull-secret.json"
+ssh_key_path: "~/.ssh/id_rsa.pub"
+
+cluster_network_cidr: "10.128.0.0/14"
+cluster_network_host_prefix: 23
+service_network_cidr: "172.30.0.0/16"
+network_type: OVNKubernetes
+
+# For disconnected installs (ADR-009)
+image_content_sources: []
+additional_trust_bundle_path: ""

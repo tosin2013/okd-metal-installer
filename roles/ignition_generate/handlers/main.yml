@@ -1,0 +1,5 @@
+---
+- name: Clean ignition work directory
+  ansible.builtin.file:
+    path: "{{ ignition_work_dir }}"
+    state: absent

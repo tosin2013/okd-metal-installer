@@ -1,0 +1,8 @@
+---
+- name: Boot delivery via manual upload
+  ansible.builtin.include_tasks: manual.yml
+  when: boot_method == 'manual'
+
+- name: Boot delivery via Redfish virtual media
+  ansible.builtin.include_tasks: redfish.yml
+  when: boot_method == 'redfish'

@@ -1,0 +1,40 @@
+---
+- name: Display ISO location for manual upload
+  ansible.builtin.debug:
+    msg:
+      - "============================================="
+      - "MANUAL BOOT REQUIRED for {{ inventory_hostname }}"
+      - "============================================="
+      - ""
+      - "ISO file: {{ iso_output_dir }}/{{ inventory_hostname }}.iso"
+      - ""
+      - "Options:"
+      - "  1. Upload ISO to server BMC/iLO/iDRAC web console as virtual media"
+      - "  2. Write ISO to USB: dd if={{ iso_output_dir }}/{{ inventory_hostname }}.iso of=/dev/sdX bs=4M status=progress"
+      - "  3. Mount ISO via vendor-specific remote console"
+      - ""
+      - "Boot the server from the ISO, then press ENTER to continue."
+      - "============================================="
+
+- name: Wait for operator to upload ISO and boot server
+  ansible.builtin.pause:
+    prompt: "Press ENTER after {{ inventory_hostname }} has booted from the ISO"
+
+- name: Wait for node to become reachable via SSH
+  ansible.builtin.wait_for:
+    host: "{{ ansible_host }}"
+    port: "{{ boot_ssh_port }}"
+    timeout: "{{ boot_wait_timeout }}"
+    state: started
+  register: _ssh_wait
+  failed_when: false
+
+- name: Report boot status
+  ansible.builtin.debug:
+    msg: >-
+      {% if _ssh_wait.state is defined and _ssh_wait.state == 'started' %}
+      Node {{ inventory_hostname }} is reachable on port {{ boot_ssh_port }}.
+      {% else %}
+      WARNING: Node {{ inventory_hostname }} did not become reachable within {{ boot_wait_timeout }}s.
+      The CoreOS installation may still be in progress. Check the server console.
+      {% endif %}

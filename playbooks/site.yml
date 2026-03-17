@@ -1,0 +1,30 @@
+---
+# OKD-Metal full deployment orchestration
+# Usage: ansible-playbook -i inventory/mycluster.ini playbooks/site.yml
+#
+# Phases executed:
+#   1. Preflight validation and topology detection (on jumpbox)
+#   2. Ignition config generation (on jumpbox)
+#   3. Boot delivery to target nodes (manual or Redfish)
+#
+# Future phases (not yet implemented):
+#   - Network configuration (ADR-005)
+#   - ISO customization (ADR-002)
+#   - Config serving via HTTP (ADR-010)
+#   - DNS configuration (ADR-004)
+
+- name: "Phase 1: Preflight validation and ignition generation"
+  hosts: localhost
+  connection: local
+  gather_facts: true
+  become: false
+  roles:
+    - preflight
+    - ignition_generate
+
+- name: "Phase 2: Boot delivery to cluster nodes"
+  hosts: masters:workers
+  gather_facts: false
+  serial: 1
+  roles:
+    - boot_deliver

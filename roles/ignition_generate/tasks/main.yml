@@ -1,0 +1,117 @@
+---
+- name: Ensure ignition work directory exists
+  ansible.builtin.file:
+    path: "{{ ignition_work_dir }}"
+    state: directory
+    mode: "0700"
+
+- name: Ensure ignition output directory exists
+  ansible.builtin.file:
+    path: "{{ ignition_output_dir }}"
+    state: directory
+    mode: "0700"
+
+- name: Check for existing ignition configs
+  ansible.builtin.find:
+    paths: "{{ ignition_output_dir }}"
+    patterns: "*.ign"
+  register: _existing_ign
+
+- name: Check ignition config age (24h certificate expiry)
+  ansible.builtin.set_fact:
+    _ignition_expired: >-
+      {{ _existing_ign.files | length > 0 and
+         (ansible_date_time.epoch | int - _existing_ign.files[0].mtime | int) > 82800 }}
+  when: _existing_ign.files | length > 0
+
+- name: Warn about expired ignition configs
+  ansible.builtin.debug:
+    msg: >-
+      WARNING: Existing Ignition configs are older than 23 hours.
+      Certificates expire at 24 hours. Regenerating.
+  when:
+    - _existing_ign.files | length > 0
+    - _ignition_expired | default(false) | bool
+
+- name: Archive old ignition configs
+  ansible.builtin.command:
+    cmd: >-
+      mv {{ ignition_output_dir }}
+      {{ ignition_output_dir }}.backup-{{ ansible_date_time.iso8601_basic_short }}
+  when:
+    - _existing_ign.files | length > 0
+    - _ignition_expired | default(false) | bool
+  changed_when: true
+
+- name: Recreate ignition output directory after archival
+  ansible.builtin.file:
+    path: "{{ ignition_output_dir }}"
+    state: directory
+    mode: "0700"
+  when:
+    - _existing_ign.files | length > 0
+    - _ignition_expired | default(false) | bool
+
+- name: Template install-config.yaml
+  ansible.builtin.template:
+    src: install-config.yaml.j2
+    dest: "{{ ignition_work_dir }}/install-config.yaml"
+    mode: "0600"
+
+- name: Backup install-config.yaml (openshift-install consumes it)
+  ansible.builtin.copy:
+    src: "{{ ignition_work_dir }}/install-config.yaml"
+    dest: "{{ ignition_output_dir }}/install-config.yaml.backup"
+    mode: "0600"
+    remote_src: true
+
+- name: Generate ignition configs for SNO
+  ansible.builtin.command:
+    cmd: "{{ openshift_install_binary }} create single-node-ignition-config --dir={{ ignition_work_dir }}"
+  when: cluster_topology == 'sno'
+  changed_when: true
+
+- name: Generate ignition configs for multi-node
+  ansible.builtin.command:
+    cmd: "{{ openshift_install_binary }} create ignition-configs --dir={{ ignition_work_dir }}"
+  when: cluster_topology in ['compact', 'ha']
+  changed_when: true
+
+- name: Find generated ignition files
+  ansible.builtin.find:
+    paths: "{{ ignition_work_dir }}"
+    patterns: "*.ign"
+  register: _generated_ign
+
+- name: Fail if no ignition files generated
+  ansible.builtin.fail:
+    msg: "openshift-install did not produce any .ign files in {{ ignition_work_dir }}"
+  when: _generated_ign.files | length == 0
+
+- name: Copy ignition files to output directory
+  ansible.builtin.copy:
+    src: "{{ item.path }}"
+    dest: "{{ ignition_output_dir }}/{{ item.path | basename }}"
+    mode: "0600"
+    remote_src: true
+  loop: "{{ _generated_ign.files }}"
+  loop_control:
+    label: "{{ item.path | basename }}"
+
+- name: Copy auth directory to output
+  ansible.builtin.copy:
+    src: "{{ ignition_work_dir }}/auth/"
+    dest: "{{ ignition_output_dir }}/auth/"
+    mode: "0600"
+    remote_src: true
+  failed_when: false
+
+- name: Report generated ignition files
+  ansible.builtin.debug:
+    msg:
+      - "--- Ignition Generation Complete ---"
+      - "Topology: {{ cluster_topology }}"
+      - "Output: {{ ignition_output_dir }}"
+      - "Files: {{ _generated_ign.files | map(attribute='path') | map('basename') | list }}"
+      - "Config expires in ~24 hours from now"
+      - "------------------------------------"

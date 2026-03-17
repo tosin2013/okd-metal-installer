@@ -1,0 +1,90 @@
+---
+- name: Gather Redfish system info
+  community.general.redfish_info:
+    category: Systems
+    command: GetSystemInventory
+    baseuri: "{{ bmc_address }}"
+    username: "{{ bmc_user }}"
+    password: "{{ bmc_password }}"
+    timeout: "{{ bmc_timeout }}"
+  register: _redfish_info
+  delegate_to: localhost
+
+- name: Report target system
+  ansible.builtin.debug:
+    msg: "Redfish target: {{ bmc_address }} ({{ _redfish_info.redfish_facts.system.entries[0][1].Model | default('unknown') }})"
+  when: _redfish_info.redfish_facts.system.entries is defined
+
+- name: Eject any existing virtual media
+  community.general.redfish_command:
+    category: Manager
+    command: VirtualMediaEject
+    baseuri: "{{ bmc_address }}"
+    username: "{{ bmc_user }}"
+    password: "{{ bmc_password }}"
+    timeout: "{{ bmc_timeout }}"
+    virtual_media:
+      image_url: ""
+    resource_id: "{{ bmc_manager_id | default(omit) }}"
+  delegate_to: localhost
+  failed_when: false
+
+- name: Mount ISO via Redfish virtual media
+  community.general.redfish_command:
+    category: Manager
+    command: VirtualMediaInsert
+    baseuri: "{{ bmc_address }}"
+    username: "{{ bmc_user }}"
+    password: "{{ bmc_password }}"
+    timeout: "{{ bmc_timeout }}"
+    virtual_media:
+      image_url: "http://{{ jumpbox_ip }}:{{ config_serve_port }}/{{ inventory_hostname }}.iso"
+      media_types:
+        - CD
+        - DVD
+    resource_id: "{{ bmc_manager_id | default(omit) }}"
+  delegate_to: localhost
+
+- name: Set one-time boot from virtual media
+  community.general.redfish_command:
+    category: Systems
+    command: SetOneTimeBoot
+    bootdevice: Cd
+    baseuri: "{{ bmc_address }}"
+    username: "{{ bmc_user }}"
+    password: "{{ bmc_password }}"
+    timeout: "{{ bmc_timeout }}"
+    resource_id: "{{ bmc_system_id | default(omit) }}"
+  delegate_to: localhost
+
+- name: Power cycle server via Redfish
+  community.general.redfish_command:
+    category: Systems
+    command: PowerForceRestart
+    baseuri: "{{ bmc_address }}"
+    username: "{{ bmc_user }}"
+    password: "{{ bmc_password }}"
+    timeout: "{{ bmc_timeout }}"
+    resource_id: "{{ bmc_system_id | default(omit) }}"
+  delegate_to: localhost
+
+- name: Wait for node to boot and become reachable via SSH
+  ansible.builtin.wait_for:
+    host: "{{ ansible_host }}"
+    port: "{{ boot_ssh_port }}"
+    timeout: "{{ boot_wait_timeout }}"
+    state: started
+    delay: 30
+  register: _ssh_wait
+  failed_when: false
+  delegate_to: localhost
+
+- name: Report boot status
+  ansible.builtin.debug:
+    msg: >-
+      {% if _ssh_wait.state is defined and _ssh_wait.state == 'started' %}
+      Node {{ inventory_hostname }} booted via Redfish and is reachable on port {{ boot_ssh_port }}.
+      {% else %}
+      WARNING: Node {{ inventory_hostname }} did not become reachable within {{ boot_wait_timeout }}s.
+      Check BMC console at https://{{ bmc_address }}
+      {% endif %}

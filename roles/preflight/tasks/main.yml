@@ -1,0 +1,116 @@
+---
+- name: Detect cluster topology from inventory
+  ansible.builtin.include_tasks: detect_topology.yml
+
+- name: Check openshift-install binary exists
+  ansible.builtin.command:
+    cmd: "which {{ openshift_install_binary }}"
+  register: _oi_check
+  changed_when: false
+  failed_when: false
+
+- name: Fail if openshift-install is not found
+  ansible.builtin.fail:
+    msg: >-
+      '{{ openshift_install_binary }}' not found in PATH.
+      Download from https://github.com/okd-project/okd/releases and place in PATH.
+  when: _oi_check.rc != 0
+
+- name: Get openshift-install version
+  ansible.builtin.command:
+    cmd: "{{ openshift_install_binary }} version"
+  register: _oi_version
+  changed_when: false
+
+- name: Report openshift-install version
+  ansible.builtin.debug:
+    msg: "{{ _oi_version.stdout_lines[0] }}"
+
+- name: Check pull secret file exists
+  ansible.builtin.stat:
+    path: "{{ pull_secret_path }}"
+  register: _pull_secret_stat
+
+- name: Fail if pull secret file is missing
+  ansible.builtin.fail:
+    msg: >-
+      Pull secret not found at {{ pull_secret_path }}.
+      For SCOS: download from https://console.redhat.com/openshift/install/pull-secret
+      For FCOS: create a file containing '{"auths":{"fake":{"auth":"aGVsbG86d29ybGQ="}}}'
+  when: not _pull_secret_stat.stat.exists
+
+- name: Validate pull secret is valid JSON
+  ansible.builtin.command:
+    cmd: "python3 -c \"import json; json.load(open('{{ pull_secret_path }}'))\""
+  changed_when: false
+
+- name: Check SSH public key file exists
+  ansible.builtin.stat:
+    path: "{{ ssh_key_path }}"
+  register: _ssh_key_stat
+
+- name: Fail if SSH public key is missing
+  ansible.builtin.fail:
+    msg: >-
+      SSH public key not found at {{ ssh_key_path }}.
+      Generate with: ssh-keygen -t ed25519
+  when: not _ssh_key_stat.stat.exists
+
+- name: Validate coreos_variant is supported
+  ansible.builtin.fail:
+    msg: >-
+      Unsupported coreos_variant '{{ coreos_variant }}'.
+      Must be 'fcos' or 'scos'.
+  when: coreos_variant not in ['fcos', 'scos']
+
+- name: Check DNS reachability (connected mode)
+  ansible.builtin.command:
+    cmd: "python3 -c \"import socket; socket.getaddrinfo('route53.amazonaws.com', 443)\""
+  changed_when: false
+  failed_when: false
+  register: _dns_check
+  when: preflight_check_dns | bool
+
+- name: Warn if DNS provider unreachable
+  ansible.builtin.debug:
+    msg: "WARNING: Cannot reach Route 53 API. DNS record creation may fail."
+  when:
+    - preflight_check_dns | bool
+    - _dns_check.rc != 0
+
+- name: Validate boot_method for all target hosts
+  ansible.builtin.fail:
+    msg: >-
+      Invalid boot_method '{{ hostvars[item].boot_method | default("manual") }}'
+      for host {{ item }}. Must be 'manual' or 'redfish'.
+  loop: "{{ groups['masters'] | default([]) + groups['workers'] | default([]) }}"
+  when: hostvars[item].boot_method | default('manual') not in ['manual', 'redfish']
+
+- name: Check BMC variables for Redfish hosts
+  ansible.builtin.fail:
+    msg: >-
+      Host {{ item }} uses boot_method=redfish but is missing required variable '{{ _missing_var }}'.
+      Required: bmc_address, bmc_user, bmc_password
+  loop: "{{ groups['masters'] | default([]) + groups['workers'] | default([]) }}"
+  vars:
+    _missing_var: >-
+      {%- if hostvars[item].bmc_address is not defined -%}bmc_address
+      {%- elif hostvars[item].bmc_user is not defined -%}bmc_user
+      {%- elif hostvars[item].bmc_password is not defined -%}bmc_password
+      {%- else -%}none{%- endif -%}
+  when:
+    - hostvars[item].boot_method | default('manual') == 'redfish'
+    - _missing_var != 'none'
+
+- name: Preflight summary
+  ansible.builtin.debug:
+    msg:
+      - "--- Preflight Summary ---"
+      - "Cluster: {{ cluster_name }}.{{ base_domain }}"
+      - "Topology: {{ cluster_topology }}"
+      - "CoreOS variant: {{ coreos_variant }}"
+      - "Disconnected: {{ disconnected }}"
+      - "Masters: {{ _master_count }}"
+      - "Workers: {{ _worker_count }}"
+      - "openshift-install: {{ _oi_version.stdout_lines[0] }}"
+      - "-------------------------"

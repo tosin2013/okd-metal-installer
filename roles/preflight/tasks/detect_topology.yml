@@ -1,0 +1,30 @@
+---
+- name: Count master and worker nodes from inventory
+  ansible.builtin.set_fact:
+    _master_count: "{{ groups['masters'] | default([]) | length }}"
+    _worker_count: "{{ groups['workers'] | default([]) | length }}"
+
+- name: Detect cluster topology from inventory
+  ansible.builtin.set_fact:
+    cluster_topology: >-
+      {%- if _master_count | int == 1 and _worker_count | int == 0 -%}
+        sno
+      {%- elif _master_count | int == 3 and _worker_count | int == 0 -%}
+        compact
+      {%- elif _master_count | int >= 3 and _worker_count | int >= 1 -%}
+        ha
+      {%- else -%}
+        unknown
+      {%- endif -%}
+
+- name: Fail on unsupported topology
+  ansible.builtin.fail:
+    msg: >-
+      Unsupported topology: {{ _master_count }} masters, {{ _worker_count }} workers.
+      Supported: SNO (1 master, 0 workers), Compact (3 masters, 0 workers),
+      HA (3+ masters, 1+ workers).
+  when: cluster_topology == "unknown"
+
+- name: Report detected topology
+  ansible.builtin.debug:
+    msg: "Detected cluster topology: {{ cluster_topology }} ({{ _master_count }} masters, {{ _worker_count }} workers)"
