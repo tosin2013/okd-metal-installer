@@ -1,3 +1,6 @@
+# Source documents (kept locally, not tracked)
+PRD.md
+
 # Ansible
 *.retry
 *.pyc
