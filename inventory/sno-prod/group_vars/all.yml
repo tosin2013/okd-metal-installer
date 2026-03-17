@@ -1,0 +1,18 @@
+---
+cluster_name: okd-sno
+base_domain: ocpincubator.com
+coreos_variant: scos
+disconnected: false
+
+route53_zone_id: "Z04957801CD6ZAE7L5S0E"
+dns_ttl: 300
+
+pull_secret_path: "{{ playbook_dir }}/../pull-secret.json"
+ssh_key_path: "~/.ssh/id_ed25519.pub"
+
+scos_iso_url: "https://rhcos.mirror.openshift.com/art/storage/prod/streams/c10s/builds/10.0.20251103-0/x86_64/scos-10.0.20251103-0-live-iso.x86_64.iso"
+
+dest_device: /dev/nvme0n1
+jumpbox_ip: "176.9.223.218"
+
+boot_wait_timeout: 3600

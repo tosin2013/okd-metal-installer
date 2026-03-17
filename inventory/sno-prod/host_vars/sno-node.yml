@@ -1,0 +1,16 @@
+---
+ansible_host: 88.99.65.35
+boot_method: hetzner
+
+network_interfaces:
+  - name: enp0s31f6
+    type: ethernet
+    state: up
+    mac: "90:1b:0e:b8:92:d6"
+    ipv4:
+      address: 88.99.65.35
+      prefix: 26
+      gateway: 88.99.65.1
+      dns:
+        - 8.8.8.8
+        - 1.1.1.1
