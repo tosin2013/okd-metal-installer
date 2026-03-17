@@ -3,13 +3,23 @@
 # Usage: ansible-playbook -i inventory/mycluster.ini playbooks/site.yml
 #
 # Phases executed:
+#   0. Disconnected preparation -- mirror registry + release mirror (if disconnected)
 #   1. Preflight validation and topology detection (on jumpbox)
 #   2. Ignition config generation (on jumpbox)
 #   3. Network configuration -- generate .nmconnection files (on jumpbox)
 #   4. ISO customization -- build per-host bootable ISOs (on jumpbox)
 #   5. Config serving -- nginx HTTP server for Ignition and ISOs (on jumpbox)
-#   6. DNS configuration -- Route 53 record management (on jumpbox)
+#   6. DNS configuration -- Route 53 or internal dnsmasq (on jumpbox)
 #   7. Boot delivery to target nodes (manual or Redfish)
+
+- name: "Phase 0: Disconnected preparation (mirror registry + release mirror)"
+  hosts: localhost
+  connection: local
+  gather_facts: true
+  become: true
+  roles:
+    - role: disconnected_prepare
+      when: disconnected | bool
 
 - name: "Phase 1: Preflight validation and ignition generation"
   hosts: localhost
@@ -44,13 +54,23 @@
   roles:
     - config_serve
 
-- name: "Phase 5: Configure DNS records"
+- name: "Phase 5a: Configure DNS records (Route 53)"
   hosts: localhost
   connection: local
   gather_facts: false
   become: false
   roles:
-    - dns_configure
+    - role: dns_configure
+      when: not (disconnected | default(false) | bool)
+
+- name: "Phase 5b: Configure internal DNS (disconnected)"
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  become: true
+  roles:
+    - role: dns_internal
+      when: disconnected | default(false) | bool
 
 - name: "Phase 6: Boot delivery to cluster nodes"
   hosts: masters:workers

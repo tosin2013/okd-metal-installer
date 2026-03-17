@@ -1,0 +1,105 @@
+---
+- name: Check if registry TLS certificate exists
+  ansible.builtin.stat:
+    path: "{{ mirror_registry_cert_dir }}/registry.crt"
+  register: _registry_cert
+
+- name: Generate self-signed TLS certificate for registry
+  ansible.builtin.command:
+    cmd: >-
+      openssl req -newkey rsa:4096 -nodes -sha256
+      -keyout {{ mirror_registry_cert_dir }}/registry.key
+      -x509 -days {{ mirror_registry_cert_days }}
+      -out {{ mirror_registry_cert_dir }}/registry.crt
+      -subj "/CN={{ mirror_registry_cert_cn }}"
+      -addext "subjectAltName=IP:{{ mirror_registry_host }},DNS:{{ ansible_hostname }}"
+  when: not _registry_cert.stat.exists
+  changed_when: true
+
+- name: Copy CA certificate for trust bundle distribution
+  ansible.builtin.copy:
+    src: "{{ mirror_registry_cert_dir }}/registry.crt"
+    dest: "{{ mirror_registry_cert_dir }}/registry-ca.crt"
+    remote_src: true
+    mode: "0644"
+
+- name: Trust registry CA on the jumpbox
+  ansible.builtin.copy:
+    src: "{{ mirror_registry_cert_dir }}/registry-ca.crt"
+    dest: /etc/pki/ca-trust/source/anchors/okd-metal-registry-ca.crt
+    remote_src: true
+    mode: "0644"
+  notify: Update CA trust store
+
+- name: Flush handlers to update CA trust before registry start
+  ansible.builtin.meta: flush_handlers
+
+- name: Create htpasswd file for registry authentication
+  ansible.builtin.command:
+    cmd: >-
+      htpasswd -bBc {{ mirror_registry_auth_dir }}/htpasswd
+      {{ mirror_registry_user }} {{ mirror_registry_password }}
+  changed_when: true
+
+- name: Check if registry container is running
+  ansible.builtin.command:
+    cmd: "podman ps --filter name={{ mirror_registry_container_name }} --format '{{ '{{' }}.Names{{ '}}' }}'"
+  register: _registry_running
+  changed_when: false
+  failed_when: false
+
+- name: Start mirror registry container
+  ansible.builtin.command:
+    cmd: >-
+      podman run -d --name {{ mirror_registry_container_name }}
+      -p {{ mirror_registry_port }}:5000
+      --restart always
+      -v {{ mirror_registry_dir }}/data:/var/lib/registry:z
+      -v {{ mirror_registry_auth_dir }}:/auth:z
+      -v {{ mirror_registry_cert_dir }}:/certs:z
+      -e REGISTRY_AUTH=htpasswd
+      -e REGISTRY_AUTH_HTPASSWD_REALM="OKD-Metal Registry"
+      -e REGISTRY_AUTH_HTPASSWD_PATH=/auth/htpasswd
+      -e REGISTRY_HTTP_TLS_CERTIFICATE=/certs/registry.crt
+      -e REGISTRY_HTTP_TLS_KEY=/certs/registry.key
+      {{ mirror_registry_image }}
+  when: mirror_registry_container_name not in (_registry_running.stdout | default(''))
+  changed_when: true
+
+- name: Generate systemd service for registry container
+  ansible.builtin.command:
+    cmd: "podman generate systemd --name {{ mirror_registry_container_name }} --files --new"
+    chdir: /etc/systemd/system
+  when: mirror_registry_container_name not in (_registry_running.stdout | default(''))
+  changed_when: true
+
+- name: Enable registry systemd service
+  ansible.builtin.systemd:
+    name: "container-{{ mirror_registry_container_name }}"
+    enabled: true
+    daemon_reload: true
+
+- name: Open registry port in firewall
+  ansible.posix.firewalld:
+    port: "{{ mirror_registry_port }}/tcp"
+    permanent: true
+    immediate: true
+    state: enabled
+
+- name: Wait for registry to become available
+  ansible.builtin.uri:
+    url: "https://{{ mirror_registry_host }}:{{ mirror_registry_port }}/v2/_catalog"
+    user: "{{ mirror_registry_user }}"
+    password: "{{ mirror_registry_password }}"
+    force_basic_auth: true
+    validate_certs: true
+    status_code: 200
+  register: _registry_health
+  retries: 5
+  delay: 3
+  until: _registry_health.status == 200
+  when: not ansible_check_mode
+
+- name: Report registry status
+  ansible.builtin.debug:
+    msg: "Mirror registry running at https://{{ mirror_registry_host }}:{{ mirror_registry_port }}"

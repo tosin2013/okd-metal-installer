@@ -1,0 +1,27 @@
+---
+mirror_registry_host: "{{ ansible_default_ipv4.address }}"
+mirror_registry_port: 5000
+mirror_registry_dir: /opt/okd-metal/registry
+mirror_registry_cert_dir: /opt/okd-metal/registry/certs
+mirror_registry_auth_dir: /opt/okd-metal/registry/auth
+mirror_registry_user: admin
+# Use ansible-vault in production: ansible-vault encrypt_string 'yourpass'
+mirror_registry_password: admin
+
+mirror_registry_container_name: okd-metal-registry
+mirror_registry_image: docker.io/library/registry:2
+
+okd_release_image: "quay.io/okd/scos-release:4.21.0-okd-scos.8"
+okd_version: "4.21.0-okd-scos.8"
+
+pull_secret_path: "{{ playbook_dir }}/../pull-secret.json"
+disconnected_pull_secret_path: "{{ playbook_dir }}/../disconnected-pull-secret.json"
+disconnected_output_dir: "{{ playbook_dir }}/../disconnected-output"
+disconnected_bundle_dir: "{{ playbook_dir }}/../disconnected-bundle"
+
+iso_cache_dir: "{{ playbook_dir }}/../.iso-cache"
+cluster_tools_dir: /usr/local/bin
+
+# Certificate subject for self-signed registry TLS
+mirror_registry_cert_cn: "okd-metal-registry"
+mirror_registry_cert_days: 3650

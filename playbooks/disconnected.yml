@@ -1,0 +1,31 @@
+---
+# OKD-Metal disconnected preparation playbook
+# Usage: ansible-playbook -i inventory/mycluster.ini playbooks/disconnected.yml
+#
+# Run this on a connected jumpbox to:
+#   1. Deploy a local container registry (podman + registry:2)
+#   2. Mirror the OKD release images to the local registry
+#   3. Bundle all artifacts (ISOs, binaries, certs) into a transferable tarball
+#
+# After bundling, transfer the tarball to the air-gapped environment
+# and run site.yml with disconnected=true.
+
+- name: "Disconnected preparation: deploy registry and mirror release"
+  hosts: localhost
+  connection: local
+  gather_facts: true
+  become: true
+  vars:
+    disconnected: true
+  roles:
+    - disconnected_prepare
+  post_tasks:
+    - name: Mirror OKD release images
+      ansible.builtin.include_role:
+        name: disconnected_prepare
+        tasks_from: mirror_release.yml
+
+    - name: Bundle artifacts for transfer
+      ansible.builtin.include_role:
+        name: disconnected_prepare
+        tasks_from: bundle_artifacts.yml

@@ -1,0 +1,9 @@
+---
+dns_internal_listen_address: "{{ ansible_default_ipv4.address | default('127.0.0.1') }}"
+dns_internal_upstream: "8.8.8.8"
+dns_internal_config_dir: /etc/dnsmasq.d
+
+# Reuse cluster-level variables
+# cluster_name, base_domain, api_vip, ingress_vip are expected from group_vars
+api_vip: ""
+ingress_vip: ""

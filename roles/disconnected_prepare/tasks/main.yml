@@ -1,0 +1,40 @@
+---
+- name: Install registry prerequisites
+  ansible.builtin.dnf:
+    name:
+      - podman
+      - httpd-tools
+      - openssl
+    state: present
+
+- name: Create registry directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0755"
+  loop:
+    - "{{ mirror_registry_dir }}"
+    - "{{ mirror_registry_dir }}/data"
+    - "{{ mirror_registry_cert_dir }}"
+    - "{{ mirror_registry_auth_dir }}"
+    - "{{ disconnected_output_dir }}"
+
+- name: Set up mirror registry
+  ansible.builtin.include_tasks: setup_registry.yml
+
+- name: Merge pull secret with local registry credentials
+  ansible.builtin.include_tasks: merge_pull_secret.yml
+
+- name: Export CA certificate path for other roles
+  ansible.builtin.set_fact:
+    additional_trust_bundle_path: "{{ mirror_registry_cert_dir }}/registry-ca.crt"
+
+- name: Report disconnected preparation status
+  ansible.builtin.debug:
+    msg:
+      - "--- Disconnected Preparation Complete ---"
+      - "Registry: {{ mirror_registry_host }}:{{ mirror_registry_port }}"
+      - "CA cert: {{ mirror_registry_cert_dir }}/registry-ca.crt"
+      - "Merged pull secret: {{ disconnected_pull_secret_path }}"
+      - "Next: run mirror_release.yml to populate the registry"
+      - "-----------------------------------------"

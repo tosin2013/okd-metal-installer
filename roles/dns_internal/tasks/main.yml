@@ -1,0 +1,63 @@
+---
+- name: Install dnsmasq
+  ansible.builtin.dnf:
+    name: dnsmasq
+    state: present
+
+- name: Ensure dnsmasq config directory exists
+  ansible.builtin.file:
+    path: "{{ dns_internal_config_dir }}"
+    state: directory
+    mode: "0755"
+
+- name: Deploy OKD DNS configuration
+  ansible.builtin.template:
+    src: okd-metal-dns.conf.j2
+    dest: "{{ dns_internal_config_dir }}/okd-metal.conf"
+    mode: "0644"
+  notify: Restart dnsmasq
+
+- name: Ensure dnsmasq reads conf-dir
+  ansible.builtin.lineinfile:
+    path: /etc/dnsmasq.conf
+    regexp: "^conf-dir="
+    line: "conf-dir={{ dns_internal_config_dir }}"
+  notify: Restart dnsmasq
+
+- name: Open DNS port in firewall (TCP)
+  ansible.posix.firewalld:
+    port: 53/tcp
+    permanent: true
+    immediate: true
+    state: enabled
+
+- name: Open DNS port in firewall (UDP)
+  ansible.posix.firewalld:
+    port: 53/udp
+    permanent: true
+    immediate: true
+    state: enabled
+
+- name: Enable and start dnsmasq
+  ansible.builtin.systemd:
+    name: dnsmasq
+    state: started
+    enabled: true
+    daemon_reload: true
+
+- name: Verify DNS resolution for api endpoint
+  ansible.builtin.command:
+    cmd: "dig +short api.{{ cluster_name }}.{{ base_domain }} @{{ dns_internal_listen_address }}"
+  register: _dns_verify
+  changed_when: false
+  failed_when: _dns_verify.stdout | length == 0
+  when: not ansible_check_mode
+
+- name: Report internal DNS status
+  ansible.builtin.debug:
+    msg:
+      - "--- Internal DNS Active ---"
+      - "Listening: {{ dns_internal_listen_address }}:53"
+      - "api.{{ cluster_name }}.{{ base_domain }} -> {{ _dns_verify.stdout_lines | default(['check mode']) | join(', ') }}"
+      - "Configure nodes to use {{ dns_internal_listen_address }} as DNS server"
+      - "---------------------------"

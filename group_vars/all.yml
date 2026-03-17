@@ -28,6 +28,11 @@ config_serve_port: 8080
 route53_zone_id: ""
 dns_ttl: 300
 
+# Disconnected configuration (ADR-009)
+mirror_registry_host: ""
+mirror_registry_port: 5000
+disconnected_pull_secret_path: ""
+
 # VNC configuration (ADR-007)
 vnc_display: 1
 vnc_port: 5901

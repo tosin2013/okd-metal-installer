@@ -1,0 +1,102 @@
+---
+- name: Ensure bundle staging directory exists
+  ansible.builtin.file:
+    path: "{{ disconnected_bundle_dir }}/staging"
+    state: directory
+    mode: "0755"
+
+- name: Create bundle subdirectories
+  ansible.builtin.file:
+    path: "{{ disconnected_bundle_dir }}/staging/{{ item }}"
+    state: directory
+    mode: "0755"
+  loop:
+    - bin
+    - certs
+    - config
+    - iso
+
+- name: Copy cluster binaries to bundle
+  ansible.builtin.copy:
+    src: "{{ cluster_tools_dir }}/{{ item }}"
+    dest: "{{ disconnected_bundle_dir }}/staging/bin/{{ item }}"
+    remote_src: true
+    mode: "0755"
+  loop:
+    - openshift-install
+    - oc
+    - kubectl
+  failed_when: false
+
+- name: Copy coreos-installer to bundle
+  ansible.builtin.copy:
+    src: /usr/bin/coreos-installer
+    dest: "{{ disconnected_bundle_dir }}/staging/bin/coreos-installer"
+    remote_src: true
+    mode: "0755"
+  failed_when: false
+
+- name: Copy registry CA certificate to bundle
+  ansible.builtin.copy:
+    src: "{{ mirror_registry_cert_dir }}/registry-ca.crt"
+    dest: "{{ disconnected_bundle_dir }}/staging/certs/registry-ca.crt"
+    remote_src: true
+    mode: "0644"
+  failed_when: false
+
+- name: Copy merged pull secret to bundle
+  ansible.builtin.copy:
+    src: "{{ disconnected_pull_secret_path }}"
+    dest: "{{ disconnected_bundle_dir }}/staging/config/pull-secret.json"
+    remote_src: true
+    mode: "0600"
+  failed_when: false
+
+- name: Copy imageContentSources to bundle
+  ansible.builtin.copy:
+    src: "{{ disconnected_output_dir }}/image-content-sources.yml"
+    dest: "{{ disconnected_bundle_dir }}/staging/config/image-content-sources.yml"
+    remote_src: true
+    mode: "0644"
+  failed_when: false
+
+- name: Find cached ISOs
+  ansible.builtin.find:
+    paths: "{{ iso_cache_dir }}"
+    patterns: "*.iso"
+  register: _cached_isos
+  failed_when: false
+
+- name: Symlink cached ISOs into bundle
+  ansible.builtin.file:
+    src: "{{ item.path }}"
+    dest: "{{ disconnected_bundle_dir }}/staging/iso/{{ item.path | basename }}"
+    state: link
+    force: true
+  loop: "{{ _cached_isos.files | default([]) }}"
+  loop_control:
+    label: "{{ item.path | basename }}"
+
+- name: Create bundle tarball
+  ansible.builtin.command:
+    cmd: >-
+      tar -czf {{ disconnected_bundle_dir }}/okd-metal-bundle-{{ cluster_name }}-{{ ansible_date_time.date }}.tar.gz
+      -C {{ disconnected_bundle_dir }}/staging
+      --dereference
+      .
+  changed_when: true
+
+- name: Get bundle size
+  ansible.builtin.stat:
+    path: "{{ disconnected_bundle_dir }}/okd-metal-bundle-{{ cluster_name }}-{{ ansible_date_time.date }}.tar.gz"
+  register: _bundle_stat
+
+- name: Report bundle status
+  ansible.builtin.debug:
+    msg:
+      - "--- Artifact Bundle Complete ---"
+      - "Bundle: {{ disconnected_bundle_dir }}/okd-metal-bundle-{{ cluster_name }}-{{ ansible_date_time.date }}.tar.gz"
+      - "Size: {{ (_bundle_stat.stat.size | default(0) / 1048576) | round(1) }} MB"
+      - "Contents: bin/, certs/, config/, iso/"
+      - "Transfer this bundle to the air-gapped environment"
+      - "--------------------------------"

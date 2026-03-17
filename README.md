@@ -41,7 +41,8 @@ okd-metal-installer/
 │       └── host_vars/          # Example per-host variable files
 ├── playbooks/
 │   ├── jumpbox.yml             # Jumpbox VNC/desktop + cluster tooling
-│   └── site.yml                # Full OKD deployment orchestration
+│   ├── site.yml                # Full OKD deployment orchestration
+│   └── disconnected.yml        # Disconnected preparation (mirror + bundle)
 ├── roles/
 │   ├── preflight/              # Input validation + topology detection
 │   ├── ignition_generate/      # install-config.yaml templating + openshift-install
@@ -49,6 +50,8 @@ okd-metal-installer/
 │   ├── iso_customize/          # CoreOS ISO download + per-host customization
 │   ├── config_serve/           # nginx HTTP server for Ignition and ISOs
 │   ├── dns_configure/          # Route 53 DNS record management
+│   ├── dns_internal/           # dnsmasq DNS for disconnected environments
+│   ├── disconnected_prepare/   # Mirror registry + release mirror + bundling
 │   ├── boot_deliver/           # Manual pause or Redfish virtual media boot
 │   └── jumpbox_provision/      # VNC, Xfce, firewalld, OKD CLI tools
 ├── files/
@@ -69,8 +72,9 @@ okd-metal-installer/
 - **Control node**: RHEL/CentOS Stream 10 (or Fedora 40+) with `ansible-core >= 2.16`
 - **Python**: 3.12+ with `boto3` and `botocore` (for Route 53 DNS)
 - **Target hardware**: x86_64 bare-metal servers with IPMI/BMC access
-- **DNS**: AWS Route 53 hosted zone (or manual DNS for disconnected mode)
+- **DNS**: AWS Route 53 hosted zone, or internal dnsmasq (disconnected mode)
 - **Pull secret**: From [console.redhat.com](https://console.redhat.com/openshift/install/pull-secret) (for SCOS) or empty JSON `{}` (for FCOS)
+- **Disconnected mode**: `podman` for local registry, sufficient disk for image mirroring (~20GB+)
 
 ## Quick Start
 
@@ -96,13 +100,32 @@ ansible-playbook -i inventory/mycluster.ini playbooks/site.yml
 
 ```
 site.yml executes:
+  0. Disconnected   -> mirror registry + release mirror (if disconnected=true)
   1. Preflight      -> validate inputs, detect topology (SNO/compact/HA)
   2. Ignition       -> template install-config.yaml, generate .ign files
   3. Networking     -> compile host_vars network definitions to .nmconnection
   4. ISO Customize  -> download CoreOS ISO, embed ignition + network + agent
   5. Config Serve   -> deploy nginx, stage ignition configs and ISOs
-  6. DNS Configure  -> create Route 53 A records (api, api-int, *.apps, nodes)
+  6. DNS Configure  -> Route 53 (connected) or dnsmasq (disconnected)
   7. Boot Deliver   -> manual upload (pause) or Redfish virtual media boot
+```
+
+### Disconnected / Air-Gapped Deployment
+
+For environments without internet access, run the preparation on a connected machine first:
+
+```bash
+# Step 1: On a connected jumpbox, mirror release and bundle artifacts
+ansible-playbook -i inventory/mycluster.ini playbooks/disconnected.yml
+
+# Step 2: Transfer the bundle to the air-gapped environment
+scp disconnected-bundle/okd-metal-bundle-*.tar.gz airgap-jumpbox:/opt/
+
+# Step 3: On the air-gapped jumpbox, extract and deploy
+tar -xzf /opt/okd-metal-bundle-*.tar.gz -C /opt/okd-metal/
+ansible-playbook -i inventory/mycluster.ini playbooks/site.yml \
+  -e disconnected=true \
+  -e @disconnected-output/image-content-sources.yml
 ```
 
 ## Variable Reference
@@ -122,6 +145,8 @@ Key variables in `group_vars/all.yml`:
 | `config_serve_port` | `8080` | HTTP port for config/ISO serving |
 | `route53_zone_id` | `""` | AWS Route 53 hosted zone ID (empty = skip DNS) |
 | `dns_ttl` | `300` | DNS record TTL in seconds |
+| `mirror_registry_host` | `""` | Local mirror registry host (disconnected mode) |
+| `mirror_registry_port` | `5000` | Local mirror registry port |
 | `network_type` | `OVNKubernetes` | Cluster network plugin |
 | `cluster_network_cidr` | `10.128.0.0/14` | Pod network CIDR |
 | `service_network_cidr` | `172.30.0.0/16` | Service network CIDR |
@@ -165,9 +190,10 @@ The MVP implementation is tracked in a [phased backlog](docs/implementation-back
 - Phase 4 (Config Serve) -- complete
 - Phase 5 (DNS Configuration) -- complete
 - Phase 6 (Jumpbox + Cluster Tooling) -- complete
+- Phase 7 (Disconnected/Air-Gapped) -- complete
 - Phase 8 (Integration + Lint) -- complete
 - Boot Delivery (ADR-011) -- complete
-- Remaining: Phase 7 (Disconnected/Air-Gapped Support)
+- All phases complete (MVP)
 
 ## License
 
