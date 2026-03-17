@@ -1,0 +1,28 @@
+---
+- name: Skip DNS configuration if Route 53 zone not set
+  ansible.builtin.debug:
+    msg: >-
+      route53_zone_id is empty -- skipping DNS configuration.
+      Set route53_zone_id in group_vars/all.yml to enable automated DNS.
+  when: route53_zone_id | length == 0
+
+- name: Validate AWS credentials
+  ansible.builtin.include_tasks: validate_aws.yml
+  when: route53_zone_id | length > 0
+
+- name: Create DNS records
+  ansible.builtin.include_tasks: create_records.yml
+  when: route53_zone_id | length > 0
+
+- name: Report DNS configuration
+  ansible.builtin.debug:
+    msg:
+      - "--- DNS Configuration Complete ---"
+      - "Zone: {{ route53_zone_id }}"
+      - "Records created for: {{ cluster_name }}.{{ base_domain }}"
+      - "  api.{{ cluster_name }}.{{ base_domain }}"
+      - "  api-int.{{ cluster_name }}.{{ base_domain }}"
+      - "  *.apps.{{ cluster_name }}.{{ base_domain }}"
+      - "  + per-node A records"
+      - "----------------------------------"
+  when: route53_zone_id | length > 0

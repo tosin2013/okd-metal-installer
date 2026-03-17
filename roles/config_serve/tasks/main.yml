@@ -1,0 +1,70 @@
+---
+- name: Install nginx
+  ansible.builtin.dnf:
+    name: nginx
+    state: present
+
+- name: Create document root directories
+  ansible.builtin.file:
+    path: "{{ config_serve_root }}/{{ item }}"
+    state: directory
+    owner: "{{ config_serve_user }}"
+    group: "{{ config_serve_user }}"
+    mode: "0755"
+  loop:
+    - ""
+    - ignition
+    - iso
+    - auth
+
+- name: Deploy nginx configuration
+  ansible.builtin.template:
+    src: nginx-okd-metal.conf.j2
+    dest: /etc/nginx/conf.d/okd-metal.conf
+    mode: "0644"
+  notify: Reload nginx
+
+- name: Remove default nginx server block
+  ansible.builtin.file:
+    path: /etc/nginx/conf.d/default.conf
+    state: absent
+  notify: Reload nginx
+  failed_when: false
+
+- name: Stage ignition configs
+  ansible.builtin.include_tasks: stage_configs.yml
+
+- name: Stage ISO images
+  ansible.builtin.include_tasks: stage_isos.yml
+
+- name: Open config serve port in firewall
+  ansible.posix.firewalld:
+    port: "{{ config_serve_port }}/tcp"
+    permanent: true
+    immediate: true
+    state: enabled
+
+- name: Enable and start nginx
+  ansible.builtin.systemd:
+    name: nginx
+    state: started
+    enabled: true
+    daemon_reload: true
+
+- name: Verify nginx is serving
+  ansible.builtin.uri:
+    url: "http://localhost:{{ config_serve_port }}/healthz"
+    return_content: true
+  register: _healthz
+  retries: 3
+  delay: 2
+  until: _healthz.status == 200
+
+- name: Report config server status
+  ansible.builtin.debug:
+    msg:
+      - "--- Config Server Active ---"
+      - "URL: http://{{ ansible_default_ipv4.address | default('localhost') }}:{{ config_serve_port }}"
+      - "Ignition: http://{{ ansible_default_ipv4.address | default('localhost') }}:{{ config_serve_port }}/ignition/"
+      - "ISOs: http://{{ ansible_default_ipv4.address | default('localhost') }}:{{ config_serve_port }}/iso/"
+      - "----------------------------"

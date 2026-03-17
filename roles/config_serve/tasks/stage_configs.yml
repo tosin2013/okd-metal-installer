@@ -1,0 +1,38 @@
+---
+- name: Find ignition files to stage
+  ansible.builtin.find:
+    paths: "{{ ignition_output_dir }}"
+    patterns: "*.ign"
+  register: _ign_files
+
+- name: Copy ignition files to serving directory
+  ansible.builtin.copy:
+    src: "{{ item.path }}"
+    dest: "{{ config_serve_root }}/ignition/{{ item.path | basename }}"
+    owner: "{{ config_serve_user }}"
+    group: "{{ config_serve_user }}"
+    mode: "0644"
+    remote_src: true
+  loop: "{{ _ign_files.files }}"
+  loop_control:
+    label: "{{ item.path | basename }}"
+  when: _ign_files.files | length > 0
+
+- name: Check for auth directory
+  ansible.builtin.stat:
+    path: "{{ ignition_output_dir }}/auth"
+  register: _auth_dir
+
+- name: Copy auth directory (kubeconfig, kubeadmin-password)
+  ansible.builtin.copy:
+    src: "{{ ignition_output_dir }}/auth/"
+    dest: "{{ config_serve_root }}/auth/"
+    owner: root
+    group: root
+    mode: "0600"
+    remote_src: true
+  when: _auth_dir.stat.exists | default(false)
+
+- name: Report staged ignition files
+  ansible.builtin.debug:
+    msg: "Staged {{ _ign_files.files | length }} ignition files to {{ config_serve_root }}/ignition/"

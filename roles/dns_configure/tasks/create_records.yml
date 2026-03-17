@@ -1,0 +1,106 @@
+---
+- name: Determine API endpoint IPs
+  ansible.builtin.set_fact:
+    _api_ips: >-
+      {% if api_vip | length > 0 %}
+      {{ [api_vip] }}
+      {% else %}
+      {{ groups['masters'] | map('extract', hostvars, 'ansible_host') | list }}
+      {% endif %}
+
+- name: Determine ingress endpoint IPs
+  ansible.builtin.set_fact:
+    _ingress_ips: >-
+      {% if ingress_vip | length > 0 %}
+      {{ [ingress_vip] }}
+      {% elif cluster_topology == 'sno' or cluster_topology == 'compact' %}
+      {{ groups['masters'] | map('extract', hostvars, 'ansible_host') | list }}
+      {% else %}
+      {{ groups['workers'] | map('extract', hostvars, 'ansible_host') | list }}
+      {% endif %}
+
+- name: Create api A record
+  amazon.aws.route53:
+    state: "{{ dns_state }}"
+    zone: "{{ base_domain }}"
+    hosted_zone_id: "{{ route53_zone_id }}"
+    record: "api.{{ cluster_name }}.{{ base_domain }}"
+    type: A
+    ttl: "{{ dns_ttl }}"
+    value: "{{ _api_ips }}"
+    overwrite: true
+  register: _dns_api
+
+- name: Create api-int A record
+  amazon.aws.route53:
+    state: "{{ dns_state }}"
+    zone: "{{ base_domain }}"
+    hosted_zone_id: "{{ route53_zone_id }}"
+    record: "api-int.{{ cluster_name }}.{{ base_domain }}"
+    type: A
+    ttl: "{{ dns_ttl }}"
+    value: "{{ _api_ips }}"
+    overwrite: true
+  register: _dns_api_int
+
+- name: Create *.apps wildcard A record
+  amazon.aws.route53:
+    state: "{{ dns_state }}"
+    zone: "{{ base_domain }}"
+    hosted_zone_id: "{{ route53_zone_id }}"
+    record: "*.apps.{{ cluster_name }}.{{ base_domain }}"
+    type: A
+    ttl: "{{ dns_ttl }}"
+    value: "{{ _ingress_ips }}"
+    overwrite: true
+  register: _dns_apps
+
+- name: Create per-node A records for masters
+  amazon.aws.route53:
+    state: "{{ dns_state }}"
+    zone: "{{ base_domain }}"
+    hosted_zone_id: "{{ route53_zone_id }}"
+    record: "{{ item }}.{{ cluster_name }}.{{ base_domain }}"
+    type: A
+    ttl: "{{ dns_ttl }}"
+    value: "{{ hostvars[item].ansible_host }}"
+    overwrite: true
+  loop: "{{ groups['masters'] | default([]) }}"
+
+- name: Create per-node A records for workers
+  amazon.aws.route53:
+    state: "{{ dns_state }}"
+    zone: "{{ base_domain }}"
+    hosted_zone_id: "{{ route53_zone_id }}"
+    record: "{{ item }}.{{ cluster_name }}.{{ base_domain }}"
+    type: A
+    ttl: "{{ dns_ttl }}"
+    value: "{{ hostvars[item].ansible_host }}"
+    overwrite: true
+  loop: "{{ groups['workers'] | default([]) }}"
+
+- name: Create PTR records for masters
+  amazon.aws.route53:
+    state: "{{ dns_state }}"
+    zone: "{{ base_domain }}"
+    hosted_zone_id: "{{ route53_zone_id }}"
+    record: "{{ hostvars[item].ansible_host | ansible.utils.ipaddr('revdns') }}"
+    type: PTR
+    ttl: "{{ dns_ttl }}"
+    value: "{{ item }}.{{ cluster_name }}.{{ base_domain }}"
+    overwrite: true
+  loop: "{{ groups['masters'] | default([]) }}"
+  when: dns_create_ptr | bool
+
+- name: Create PTR records for workers
+  amazon.aws.route53:
+    state: "{{ dns_state }}"
+    zone: "{{ base_domain }}"
+    hosted_zone_id: "{{ route53_zone_id }}"
+    record: "{{ hostvars[item].ansible_host | ansible.utils.ipaddr('revdns') }}"
+    type: PTR
+    ttl: "{{ dns_ttl }}"
+    value: "{{ item }}.{{ cluster_name }}.{{ base_domain }}"
+    overwrite: true
+  loop: "{{ groups['workers'] | default([]) }}"
+  when: dns_create_ptr | bool

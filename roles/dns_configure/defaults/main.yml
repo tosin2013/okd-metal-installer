@@ -1,0 +1,12 @@
+---
+route53_zone_id: ""
+dns_ttl: 300
+dns_state: present
+
+# Set to true to create PTR (reverse DNS) records
+dns_create_ptr: false
+
+# Override API/ingress VIP if using a load balancer
+# When empty, records point to individual node IPs
+api_vip: ""
+ingress_vip: ""

@@ -1,0 +1,38 @@
+---
+- name: Find ISO files to stage
+  ansible.builtin.find:
+    paths: "{{ iso_output_dir }}"
+    patterns: "*.iso"
+  register: _iso_files
+
+- name: Symlink ISO files to serving directory
+  ansible.builtin.file:
+    src: "{{ item.path }}"
+    dest: "{{ config_serve_root }}/iso/{{ item.path | basename }}"
+    state: link
+    force: true
+  loop: "{{ _iso_files.files }}"
+  loop_control:
+    label: "{{ item.path | basename }}"
+  when:
+    - _iso_files.files | length > 0
+    - iso_use_symlinks | bool
+
+- name: Copy ISO files to serving directory
+  ansible.builtin.copy:
+    src: "{{ item.path }}"
+    dest: "{{ config_serve_root }}/iso/{{ item.path | basename }}"
+    owner: "{{ config_serve_user }}"
+    group: "{{ config_serve_user }}"
+    mode: "0644"
+    remote_src: true
+  loop: "{{ _iso_files.files }}"
+  loop_control:
+    label: "{{ item.path | basename }}"
+  when:
+    - _iso_files.files | length > 0
+    - not (iso_use_symlinks | bool)
+
+- name: Report staged ISO files
+  ansible.builtin.debug:
+    msg: "Staged {{ _iso_files.files | length }} ISO files to {{ config_serve_root }}/iso/ (symlinks: {{ iso_use_symlinks }})"

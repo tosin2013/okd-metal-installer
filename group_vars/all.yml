@@ -24,6 +24,10 @@ network_type: OVNKubernetes
 boot_method: manual
 config_serve_port: 8080
 
+# DNS configuration (ADR-004)
+route53_zone_id: ""
+dns_ttl: 300
+
 # VNC configuration (ADR-007)
 vnc_display: 1
 vnc_port: 5901

@@ -7,11 +7,9 @@
 #   2. Ignition config generation (on jumpbox)
 #   3. Network configuration -- generate .nmconnection files (on jumpbox)
 #   4. ISO customization -- build per-host bootable ISOs (on jumpbox)
-#   5. Boot delivery to target nodes (manual or Redfish)
-#
-# Future phases (not yet implemented):
-#   - Config serving via HTTP (ADR-010)
-#   - DNS configuration (ADR-004)
+#   5. Config serving -- nginx HTTP server for Ignition and ISOs (on jumpbox)
+#   6. DNS configuration -- Route 53 record management (on jumpbox)
+#   7. Boot delivery to target nodes (manual or Redfish)
 
 - name: "Phase 1: Preflight validation and ignition generation"
   hosts: localhost
@@ -38,7 +36,23 @@
   roles:
     - iso_customize
 
-- name: "Phase 4: Boot delivery to cluster nodes"
+- name: "Phase 4: Start config HTTP server"
+  hosts: localhost
+  connection: local
+  gather_facts: true
+  become: true
+  roles:
+    - config_serve
+
+- name: "Phase 5: Configure DNS records"
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  become: false
+  roles:
+    - dns_configure
+
+- name: "Phase 6: Boot delivery to cluster nodes"
   hosts: masters:workers
   gather_facts: false
   serial: 1

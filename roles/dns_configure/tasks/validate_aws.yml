@@ -1,0 +1,25 @@
+---
+- name: Validate Route 53 zone ID is configured
+  ansible.builtin.fail:
+    msg: >-
+      route53_zone_id is not set. Provide your Route 53 hosted zone ID
+      in group_vars/all.yml or pass it as an extra variable.
+  when: route53_zone_id | length == 0
+
+- name: Verify AWS credentials
+  amazon.aws.aws_caller_identity_info:
+  register: _aws_identity
+  failed_when: false
+
+- name: Fail if AWS credentials are invalid
+  ansible.builtin.fail:
+    msg: >-
+      AWS credentials not configured or invalid.
+      Set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY environment variables,
+      or configure credentials via Ansible Vault variables.
+  when: _aws_identity is failed
+
+- name: Report AWS identity
+  ansible.builtin.debug:
+    msg: "AWS authenticated as: {{ _aws_identity.arn | default('unknown') }} (account {{ _aws_identity.account | default('unknown') }})"
+  when: _aws_identity is not failed

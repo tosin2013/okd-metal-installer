@@ -1,0 +1,10 @@
+---
+config_serve_port: 8080
+config_serve_root: /var/www/okd-metal
+config_serve_user: nginx
+
+ignition_output_dir: "{{ playbook_dir }}/../ignition-output"
+iso_output_dir: "{{ playbook_dir }}/../iso-output"
+
+# Use symlinks for ISOs to save disk space (ISOs can be ~1GB each)
+iso_use_symlinks: true
