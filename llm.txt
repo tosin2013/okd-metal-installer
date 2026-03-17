@@ -1,0 +1,289 @@
+# Deployment Guide
+
+## Overview
+
+OKD-Metal Installer is an Ansible-driven bare-metal provisioning system for OKD (community Kubernetes/OpenShift). It automates deploying OKD clusters on physical servers through Ignition config generation, custom CoreOS ISO creation, DNS registration, network configuration, and boot delivery. All automation is implemented as Ansible playbooks and roles -- there are no containers, Makefiles, or CI/CD pipelines.
+
+Supported cluster topologies: Single-Node (SNO), Compact (3 masters), and HA (3+ masters + workers). Supported boot delivery methods: manual ISO upload, Redfish virtual media, and Hetzner Robot API rescue mode. Supports both connected (Route 53 DNS) and disconnected/air-gapped (dnsmasq + local mirror) environments.
+
+## Prerequisites
+
+### Control Node (Jumpbox)
+
+- RHEL/CentOS Stream 10 or Fedora 40+ (x86_64)
+- ansible-core >= 2.16
+- Python 3.12+ with pip
+- openshift-install binary (matching target OKD version) on PATH
+- oc binary (OpenShift CLI) on PATH
+- coreos-installer binary on PATH
+- SSH keypair for node access (~/.ssh/id_ed25519 or id_rsa)
+
+### Python Dependencies
+
+- boto3 (for AWS Route 53 DNS management)
+- botocore (dependency of boto3)
+
+### Ansible Collections
+
+- ansible.posix >= 2.1.0
+- amazon.aws >= 7.0.0
+- community.general >= 9.0.0
+
+### Infrastructure
+
+- x86_64 bare-metal servers with network connectivity to the jumpbox
+- BMC/IPMI access (for Redfish boot delivery) or Hetzner Robot API credentials (for Hetzner boot delivery) or physical/KVM console access (for manual boot delivery)
+- DNS: AWS Route 53 hosted zone (connected mode) or internal network (disconnected mode)
+- Pull secret: from console.redhat.com (SCOS) or fake JSON for OKD community (FCOS)
+
+## Deployment Steps
+
+### Connected SNO Deployment (Typical)
+
+1. Install Ansible collections:
+   ```
+   ansible-galaxy collection install -r requirements.yml
+   ```
+
+2. Install Python dependencies:
+   ```
+   pip3 install boto3 botocore
+   ```
+
+3. (Optional) Provision jumpbox with VNC desktop and OKD CLI tools:
+   ```
+   ansible-playbook -i inventory/local.ini playbooks/jumpbox.yml
+   ```
+
+4. Create cluster inventory from examples:
+   ```
+   cp inventory/examples/sno.ini inventory/mycluster.ini
+   mkdir -p inventory/mycluster/host_vars
+   cp inventory/examples/host_vars/sno-node.yml inventory/mycluster/host_vars/sno-node.yml
+   ```
+
+5. Edit inventory files with your host details:
+   - Set ansible_host, network_interfaces, boot_method in host_vars
+   - Set cluster_name, base_domain, route53_zone_id in group_vars or hosts.ini [all:vars]
+
+6. Create pull secret file:
+   ```
+   echo '{"auths":{"fake":{"auth":"aWQ6cGFzcwo="}}}' > pull-secret.json
+   ```
+
+7. Set AWS credentials (for Route 53 DNS):
+   ```
+   export AWS_ACCESS_KEY_ID=<your-key>
+   export AWS_SECRET_ACCESS_KEY=<your-secret>
+   ```
+
+8. Run the full deployment:
+   ```
+   ansible-playbook -i inventory/mycluster.ini playbooks/site.yml
+   ```
+
+9. Monitor bootstrap (automated by bootstrap_monitor role, or manually):
+   ```
+   export KUBECONFIG=$(pwd)/ignition-output/auth/kubeconfig
+   openshift-install wait-for bootstrap-complete --dir=.ignition-work
+   openshift-install wait-for install-complete --dir=.ignition-work
+   ```
+
+10. Validate cluster:
+    ```
+    oc get nodes
+    oc get clusterversion
+    oc get clusteroperators
+    ```
+
+### Disconnected / Air-Gapped Deployment
+
+1. On a connected machine, mirror the OKD release and bundle artifacts:
+   ```
+   ansible-playbook -i inventory/mycluster.ini playbooks/disconnected.yml
+   ```
+
+2. Transfer bundle to the air-gapped jumpbox:
+   ```
+   scp disconnected-bundle/okd-metal-bundle-*.tar.gz airgap-jumpbox:/opt/
+   ```
+
+3. On the air-gapped jumpbox, extract and deploy:
+   ```
+   tar -xzf /opt/okd-metal-bundle-*.tar.gz -C /opt/okd-metal/
+   ansible-playbook -i inventory/mycluster.ini playbooks/site.yml \
+     -e disconnected=true \
+     -e @disconnected-output/image-content-sources.yml
+   ```
+
+### Hetzner Bare-Metal Deployment
+
+1. Generate SSH keypair and register with Hetzner Robot API:
+   ```
+   ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519 -N "" -C "okd-metal-jumpbox"
+   curl -u '$USER:$PASS' -d "name=okd-metal-jumpbox" \
+     -d "data=$(cat ~/.ssh/id_ed25519.pub)" \
+     https://robot-ws.your-server.de/key
+   ```
+
+2. Create Ansible Vault for Hetzner credentials:
+   ```
+   ansible-vault create inventory/mycluster/vault.yml
+   ```
+   Contents:
+   ```
+   hetzner_robot_user: "<robot-webservice-user>"
+   hetzner_robot_password: "<robot-webservice-password>"
+   hetzner_ssh_key_fingerprint: "<registered-key-fingerprint>"
+   ```
+
+3. Set boot_method: hetzner in host_vars for each target node.
+
+4. Run deployment with vault:
+   ```
+   source .env
+   ansible-playbook -i inventory/mycluster/hosts.ini playbooks/site.yml \
+     --vault-password-file .vault_password \
+     -e @inventory/mycluster/vault.yml -v
+   ```
+
+## Scripts Reference
+
+- **Script Name**: discovery-agent.sh
+  **Location**: files/discovery-agent.sh
+  **Description**: Post-install agent embedded into CoreOS live ISOs via coreos-installer. Collects hardware telemetry (CPU, memory, disks, NICs), phones home to the jumpbox HTTP API, and logs installation completion. Runs automatically after coreos-installer completes disk installation.
+  **Usage**: Not invoked directly. Embedded into ISOs by the iso_customize role via coreos-installer iso customize --post-install.
+  **Dependencies**: Requires curl (for phone-home), standard Linux utilities (lsblk, ip, awk). Optionally uses JUMPBOX_URL and NODE_NAME environment variables.
+  **Notes**: The phone-home endpoint (/api/v1/discovery) is informational only; deployment does not depend on it succeeding.
+
+## Playbooks Reference
+
+- **Playbook Name**: site.yml
+  **Location**: playbooks/site.yml
+  **Description**: Main deployment orchestration. Executes all phases from preflight through bootstrap monitoring.
+  **Usage**: ansible-playbook -i inventory/mycluster.ini playbooks/site.yml
+  **Dependencies**: All prerequisites listed above. Inventory with hosts.ini, group_vars, and host_vars configured.
+  **Notes**: Phases 0-7 execute sequentially. Phase 0 (disconnected) is skipped when disconnected=false. Phase 5b (internal DNS) is skipped when disconnected=false. Phase 7 (bootstrap_monitor) waits up to 1 hour for the cluster to become ready.
+
+- **Playbook Name**: jumpbox.yml
+  **Location**: playbooks/jumpbox.yml
+  **Description**: Provisions the jumpbox with VNC desktop (Xfce), firewalld rules, and OKD CLI tools (oc, openshift-install, coreos-installer).
+  **Usage**: ansible-playbook -i inventory/local.ini playbooks/jumpbox.yml
+  **Dependencies**: RHEL/CentOS Stream 10 or Fedora. Internet access for package installation.
+  **Notes**: Uses inventory/local.ini which targets localhost. Requires become (root) privileges.
+
+- **Playbook Name**: disconnected.yml
+  **Location**: playbooks/disconnected.yml
+  **Description**: Prepares artifacts for air-gapped deployment. Sets up a local container registry, mirrors the OKD release images, and bundles everything into a transferable archive.
+  **Usage**: ansible-playbook -i inventory/mycluster.ini playbooks/disconnected.yml
+  **Dependencies**: podman, sufficient disk space (~20GB+), internet access.
+  **Notes**: Run on a connected machine. Transfer the output bundle to the air-gapped environment.
+
+## Roles Reference (Execution Order in site.yml)
+
+- **Role**: disconnected_prepare (Phase 0)
+  **Description**: Mirror registry setup, OKD release mirroring, pull secret merging, artifact bundling.
+  **Condition**: Only runs when disconnected=true.
+
+- **Role**: preflight (Phase 1)
+  **Description**: Validates inputs (cluster_name, base_domain, pull_secret, SSH key), detects topology (SNO/compact/HA), checks for required binaries (openshift-install), validates boot_method and BMC/Hetzner credentials.
+
+- **Role**: ignition_generate (Phase 1)
+  **Description**: Templates install-config.yaml, runs openshift-install to generate Ignition configs (.ign files). Handles SNO (single-node-ignition-config) and multi-node (ignition-configs) variants. Detects and skips regeneration if configs are fresh (<24h).
+
+- **Role**: network_configure (Phase 2)
+  **Description**: Converts NMState-style network_interfaces definitions from host_vars into NetworkManager .nmconnection files for each node.
+
+- **Role**: iso_customize (Phase 3)
+  **Description**: Downloads the base CoreOS ISO (FCOS or SCOS), then runs coreos-installer iso customize for each node to embed Ignition, network config, and the discovery agent.
+
+- **Role**: config_serve (Phase 4)
+  **Description**: Installs and configures nginx to serve Ignition configs and ISOs via HTTP on the jumpbox. Stages files and manages permissions.
+
+- **Role**: dns_configure (Phase 5a)
+  **Description**: Creates Route 53 DNS records: api.<cluster>.<domain>, api-int.<cluster>.<domain>, *.apps.<cluster>.<domain>, and per-node A records. Uses the amazon.aws.route53 Ansible module.
+  **Condition**: Only runs when disconnected=false.
+
+- **Role**: dns_internal (Phase 5b)
+  **Description**: Configures dnsmasq for local DNS resolution in disconnected environments.
+  **Condition**: Only runs when disconnected=true.
+
+- **Role**: boot_deliver (Phase 6)
+  **Description**: Delivers the boot ISO to target nodes. Three methods: manual (pause for operator), redfish (Redfish virtual media mount + power cycle), hetzner (Robot API rescue activation, disk wipe, ISO dd, reboot).
+
+- **Role**: bootstrap_monitor (Phase 7)
+  **Description**: Monitors bootstrap progress by polling the Kubernetes API healthz endpoint, running openshift-install wait-for bootstrap-complete and install-complete, then validating with oc commands. Produces a deployment report.
+
+## Environment Variables
+
+- AWS_ACCESS_KEY_ID: AWS access key for Route 53 DNS management. Required for connected deployments with Route 53.
+- AWS_SECRET_ACCESS_KEY: AWS secret key for Route 53 DNS management. Required for connected deployments with Route 53.
+- KUBECONFIG: Path to the cluster kubeconfig file (generated at ignition-output/auth/kubeconfig). Used by oc and openshift-install commands.
+- JUMPBOX_URL: (Optional) URL of the jumpbox HTTP server for the discovery agent phone-home feature. Set automatically by the iso_customize role.
+- NODE_NAME: (Optional) Hostname override for the discovery agent. Defaults to system hostname.
+
+## Key Ansible Variables
+
+### Group Variables (group_vars/all.yml or inventory group_vars)
+
+- cluster_name: OKD cluster name (default: okd-metal)
+- base_domain: Base DNS domain (default: example.com)
+- coreos_variant: CoreOS variant, fcos or scos (default: scos)
+- disconnected: Enable air-gapped mode (default: false)
+- boot_method: Boot delivery method, manual/redfish/hetzner (default: manual)
+- route53_zone_id: AWS Route 53 hosted zone ID (required for DNS)
+- pull_secret_path: Path to pull secret JSON file (default: ../pull-secret.json)
+- ssh_key_path: Path to SSH public key (default: ~/.ssh/id_rsa.pub)
+- dest_device: Target disk for CoreOS installation (default: /dev/sda)
+- jumpbox_ip: IP address of the jumpbox for ISO/config serving
+
+### Per-Host Variables (host_vars/<hostname>.yml)
+
+- ansible_host: Node IP address (required)
+- boot_method: Override boot method per host (optional)
+- network_interfaces: List of network interface definitions with name, mac, ipv4 config (required)
+- bmc_address: BMC IP for Redfish boot delivery
+- bmc_user: BMC username for Redfish
+- bmc_password: BMC password for Redfish (use Ansible Vault)
+
+## Configuration Files
+
+- ansible.cfg: Sets default inventory (inventory/local.ini), roles path, forks (10), disables host key checking and retry files.
+- requirements.yml: Ansible Galaxy collection dependencies.
+- .ansible-lint: ansible-lint configuration.
+- .yamllint: YAML linting configuration.
+- .gitignore: Excludes secrets (.env, .vault_password, pull-secret.json, *.vault), generated artifacts (*.iso, *.ign, install-config.yaml), and IDE files.
+
+## Generated Artifacts (Not Committed)
+
+- .ignition-work/: Working directory for openshift-install (consumed during generation).
+- ignition-output/: Generated Ignition configs and auth/kubeconfig.
+- iso-output/: Per-node customized CoreOS ISOs.
+- network-output/: Per-node .nmconnection files.
+- .iso-cache/: Cached base CoreOS ISO download.
+
+## Architectural Decision Records
+
+- ADR-001: Use Ansible as primary automation framework
+- ADR-002: Custom discovery agent and boot media
+- ADR-003: Bootstrap-in-place architecture
+- ADR-004: Route 53 DNS integration
+- ADR-005: Declarative networking with NMState
+- ADR-006: Flexible cluster topology support (SNO/compact/HA)
+- ADR-007: Jumpbox VNC development access
+- ADR-008: FCOS/SCOS dual-OS compatibility
+- ADR-009: Disconnected/air-gapped installation support
+- ADR-010: Ignition configuration generation
+- ADR-011: Boot delivery strategy (manual, Redfish, Hetzner)
+- ADR-012: Bootstrap monitoring strategy
+
+## Troubleshooting
+
+- If openshift-install fails to generate configs, check that the .ignition-work/ directory is clean (delete it and re-run).
+- If the ISO build fails, verify coreos-installer is installed and the base ISO URL is reachable.
+- If Route 53 DNS creation fails with InvalidChangeBatch, check that route53_zone_id is correct and AWS credentials have the required permissions (see docs/aws-iam-policy.json).
+- If nginx returns 403 for ISOs, check file permissions on iso-output/ and parent directories (nginx user needs read access).
+- If Hetzner rescue mode fails to boot (server boots from disk instead of PXE), use KVM console to either wipe disks or select PXE from the UEFI boot menu. See GitHub issue #1.
+- If SSH to CoreOS returns "Connection reset by peer" after bootstrap, the node may be in a partial bootstrap state. Use openshift-install wait-for bootstrap-complete to monitor progress; do not assume SSH availability means bootstrap is done.
+- If bootstrap takes longer than expected, check the KVM/VNC console for kernel panics or disk errors. Multi-disk servers may have boot order confusion; ensure secondary disks are wiped.
+- Ignition configs expire after 24 hours. If deployment stalls, delete .ignition-work/ and re-run to regenerate fresh configs.
