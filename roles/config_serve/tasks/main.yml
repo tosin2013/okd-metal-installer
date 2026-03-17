@@ -59,6 +59,7 @@
   retries: 3
   delay: 2
   until: _healthz.status == 200
+  when: not ansible_check_mode
 
 - name: Report config server status
   ansible.builtin.debug:

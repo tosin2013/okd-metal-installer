@@ -1,0 +1,30 @@
+---
+offline: true
+
+skip_list:
+  - galaxy[no-changelog]
+  - galaxy[no-runtime]
+  - galaxy[version-incorrect]
+  - meta-no-info
+  # Variables are intentionally shared across roles via group_vars/all.yml
+  - var-naming[no-role-prefix]
+
+warn_list:
+  - command-instead-of-module
+  - no-changed-when
+  - ignore-errors
+  - risky-shell-pipe
+
+exclude_paths:
+  - .cache/
+  - .github/
+  - docs/
+  - rules/
+  - inventory/
+
+kinds:
+  - playbook: "playbooks/*.yml"
+  - tasks: "roles/*/tasks/*.yml"
+  - vars: "roles/*/defaults/*.yml"
+  - vars: "group_vars/*.yml"
+  - handlers: "roles/*/handlers/*.yml"

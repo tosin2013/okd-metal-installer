@@ -21,7 +21,9 @@
     dest: "{{ iso_cache_dir }}/{{ _iso_filename }}"
     mode: "0644"
     timeout: 600
-  when: not _iso_cached.stat.exists
+  when:
+    - not _iso_cached.stat.exists
+    - not ansible_check_mode
   register: _iso_download
 
 - name: Report ISO status

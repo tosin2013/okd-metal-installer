@@ -1,0 +1,31 @@
+---
+# Single-Node OKD (SNO) host variables
+# Copy to host_vars/sno-node.yml and edit for your environment
+
+# Node IP address (must match ansible_host in inventory)
+ansible_host: 192.168.1.10
+
+# Boot delivery method: "manual" (operator uploads ISO) or "redfish" (automated)
+boot_method: manual
+
+# BMC/Redfish settings (required when boot_method: redfish)
+# bmc_address: 192.168.1.110
+# bmc_user: admin
+# bmc_password: !vault |
+#   $ANSIBLE_VAULT;1.1;AES256
+#   ...encrypt with: ansible-vault encrypt_string 'yourpassword' --name bmc_password
+
+# Network interfaces (ADR-005)
+# Defines static network configuration embedded into the CoreOS ISO
+network_interfaces:
+  - name: eno1
+    type: ethernet
+    state: up
+    ipv4:
+      address: 192.168.1.10
+      prefix: 24
+      gateway: 192.168.1.1
+      dns:
+        - 192.168.1.1
+        - 8.8.8.8
+    # mac: "aa:bb:cc:dd:ee:ff"  # Optional: for predictable interface naming

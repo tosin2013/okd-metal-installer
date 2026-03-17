@@ -57,6 +57,7 @@
     src: install-config.yaml.j2
     dest: "{{ ignition_work_dir }}/install-config.yaml"
     mode: "0600"
+  register: _install_config
 
 - name: Backup install-config.yaml (openshift-install consumes it)
   ansible.builtin.copy:
@@ -64,6 +65,7 @@
     dest: "{{ ignition_output_dir }}/install-config.yaml.backup"
     mode: "0600"
     remote_src: true
+  when: not ansible_check_mode
 
 - name: Generate ignition configs for SNO
   ansible.builtin.command:
@@ -82,11 +84,14 @@
     paths: "{{ ignition_work_dir }}"
     patterns: "*.ign"
   register: _generated_ign
+  when: not ansible_check_mode
 
 - name: Fail if no ignition files generated
   ansible.builtin.fail:
     msg: "openshift-install did not produce any .ign files in {{ ignition_work_dir }}"
-  when: _generated_ign.files | length == 0
+  when:
+    - not ansible_check_mode
+    - _generated_ign.files | length == 0
 
 - name: Copy ignition files to output directory
   ansible.builtin.copy:
@@ -94,9 +99,10 @@
     dest: "{{ ignition_output_dir }}/{{ item.path | basename }}"
     mode: "0600"
     remote_src: true
-  loop: "{{ _generated_ign.files }}"
+  loop: "{{ _generated_ign.files | default([]) }}"
   loop_control:
     label: "{{ item.path | basename }}"
+  when: not ansible_check_mode
 
 - name: Copy auth directory to output
   ansible.builtin.copy:
@@ -105,6 +111,7 @@
     mode: "0600"
     remote_src: true
   failed_when: false
+  when: not ansible_check_mode
 
 - name: Report generated ignition files
   ansible.builtin.debug:
@@ -112,6 +119,6 @@
       - "--- Ignition Generation Complete ---"
       - "Topology: {{ cluster_topology }}"
       - "Output: {{ ignition_output_dir }}"
-      - "Files: {{ _generated_ign.files | map(attribute='path') | map('basename') | list }}"
+      - "Files: {{ _generated_ign.files | default([]) | map(attribute='path') | map('basename') | list }}"
       - "Config expires in ~24 hours from now"
       - "------------------------------------"

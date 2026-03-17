@@ -1,0 +1,37 @@
+---
+# Worker node host variables (HA cluster)
+# Copy to host_vars/worker-0.yml and edit for your environment
+
+# Node IP address (must match ansible_host in inventory)
+ansible_host: 192.168.1.20
+
+# Boot delivery method: "manual" or "redfish"
+boot_method: redfish
+
+# BMC/Redfish settings (required for boot_method: redfish)
+bmc_address: 192.168.1.120
+bmc_user: admin
+# Encrypt passwords: ansible-vault encrypt_string 'yourpassword' --name bmc_password
+bmc_password: !vault |
+  $ANSIBLE_VAULT;1.1;AES256
+  00000000000000000000000000000000000000000000000000000000000000000000
+  00000000000000000000000000000000000000000000000000000000000000000000
+  0000000000000000000000000000000000000000000000000000000000000000
+
+# Network interfaces -- bond example (ADR-005)
+# This demonstrates bonding two NICs for redundancy
+network_interfaces:
+  - name: bond0
+    type: bond
+    bond_mode: 802.3ad
+    bond_members:
+      - eno1
+      - eno2
+    state: up
+    ipv4:
+      address: 192.168.1.20
+      prefix: 24
+      gateway: 192.168.1.1
+      dns:
+        - 192.168.1.1
+        - 8.8.8.8

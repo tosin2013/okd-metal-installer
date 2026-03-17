@@ -1,7 +1,7 @@
 ---
 - name: Determine ignition file for {{ _current_host }}
   ansible.builtin.set_fact:
-    _host_role: "{{ hostvars[_current_host].group_names | intersect(['masters']) | length > 0 | ternary('master', 'worker') }}"
+    _host_role: "{{ (hostvars[_current_host].group_names | intersect(['masters']) | length > 0) | ternary('master', 'worker') }}"
 
 - name: Set ignition source file for {{ _current_host }}
   ansible.builtin.set_fact:
@@ -22,7 +22,9 @@
 - name: Fail if ignition file missing for {{ _current_host }}
   ansible.builtin.fail:
     msg: "Ignition file not found: {{ _ignition_file | trim }}. Run ignition_generate role first."
-  when: not _ign_stat.stat.exists
+  when:
+    - not ansible_check_mode
+    - not _ign_stat.stat.exists
 
 - name: Collect network keyfiles for {{ _current_host }}
   ansible.builtin.find:

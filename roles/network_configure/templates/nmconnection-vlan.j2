@@ -1,0 +1,30 @@
+[connection]
+id={{ iface.name }}
+type=vlan
+interface-name={{ iface.name }}
+autoconnect=true
+
+[vlan]
+id={{ iface.vlan_id }}
+parent={{ iface.vlan_parent }}
+
+{% if iface.ipv4 is defined %}
+[ipv4]
+method=manual
+{% if iface.ipv4.gateway is defined %}
+address1={{ iface.ipv4.address }}/{{ iface.ipv4.prefix }},{{ iface.ipv4.gateway }}
+{% else %}
+address1={{ iface.ipv4.address }}/{{ iface.ipv4.prefix }}
+{% endif %}
+{% if iface.ipv4.dns is defined %}
+dns={{ iface.ipv4.dns | join(';') }};
+{% elif default_dns_servers is defined %}
+dns={{ default_dns_servers | join(';') }};
+{% endif %}
+{% else %}
+[ipv4]
+method=auto
+{% endif %}
+
+[ipv6]
+method={{ iface.ipv6.method | default(default_ipv6_method) }}

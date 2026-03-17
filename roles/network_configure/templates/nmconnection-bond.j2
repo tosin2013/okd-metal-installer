@@ -1,0 +1,44 @@
+[connection]
+id={{ iface.name }}
+type=bond
+interface-name={{ iface.name }}
+autoconnect=true
+
+[bond]
+mode={{ iface.bond_mode | default('802.3ad') }}
+{% if iface.bond_options is defined %}
+{% for key, value in iface.bond_options.items() %}
+{{ key }}={{ value }}
+{% endfor %}
+{% endif %}
+{% if iface.bond_mode | default('802.3ad') == '802.3ad' %}
+lacp_rate=fast
+miimon=100
+{% elif iface.bond_mode | default('') == 'active-backup' %}
+miimon=100
+primary={{ iface.bond_members[0] }}
+{% endif %}
+
+{% if iface.ipv4 is defined %}
+[ipv4]
+method=manual
+{% if iface.ipv4.gateway is defined %}
+address1={{ iface.ipv4.address }}/{{ iface.ipv4.prefix }},{{ iface.ipv4.gateway }}
+{% else %}
+address1={{ iface.ipv4.address }}/{{ iface.ipv4.prefix }}
+{% endif %}
+{% if iface.ipv4.dns is defined %}
+dns={{ iface.ipv4.dns | join(';') }};
+{% elif default_dns_servers is defined %}
+dns={{ default_dns_servers | join(';') }};
+{% endif %}
+{% if iface.ipv4.dns_search is defined %}
+dns-search={{ iface.ipv4.dns_search | join(';') }};
+{% endif %}
+{% else %}
+[ipv4]
+method=auto
+{% endif %}
+
+[ipv6]
+method={{ iface.ipv6.method | default(default_ipv6_method) }}

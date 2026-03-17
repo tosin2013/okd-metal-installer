@@ -1,0 +1,49 @@
+[connection]
+id={{ iface.name }}
+type=ethernet
+interface-name={{ iface.name }}
+autoconnect=true
+{% if iface.autoconnect_priority is defined %}
+autoconnect-priority={{ iface.autoconnect_priority }}
+{% endif %}
+
+[ethernet]
+{% if iface.mac is defined %}
+mac-address={{ iface.mac }}
+{% endif %}
+{% if iface.mtu is defined %}
+mtu={{ iface.mtu }}
+{% endif %}
+
+{% if iface.ipv4 is defined %}
+[ipv4]
+method=manual
+{% if iface.ipv4.gateway is defined %}
+address1={{ iface.ipv4.address }}/{{ iface.ipv4.prefix }},{{ iface.ipv4.gateway }}
+{% else %}
+address1={{ iface.ipv4.address }}/{{ iface.ipv4.prefix }}
+{% endif %}
+{% if iface.ipv4.dns is defined %}
+dns={{ iface.ipv4.dns | join(';') }};
+{% elif default_dns_servers is defined %}
+dns={{ default_dns_servers | join(';') }};
+{% endif %}
+{% if iface.ipv4.dns_search is defined %}
+dns-search={{ iface.ipv4.dns_search | join(';') }};
+{% endif %}
+{% if iface.ipv4.routes is defined %}
+{% for route in iface.ipv4.routes %}
+route{{ loop.index }}={{ route.destination }},{{ route.gateway }}
+{% endfor %}
+{% endif %}
+{% else %}
+[ipv4]
+method=auto
+{% endif %}
+
+[ipv6]
+method={{ iface.ipv6.method | default(default_ipv6_method) }}
+{% if iface.ipv6 is defined and iface.ipv6.address is defined %}
+address1={{ iface.ipv6.address }}/{{ iface.ipv6.prefix }}{% if iface.ipv6.gateway is defined %},{{ iface.ipv6.gateway }}{% endif %}
+
+{% endif %}

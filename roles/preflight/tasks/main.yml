@@ -24,7 +24,8 @@
 
 - name: Report openshift-install version
   ansible.builtin.debug:
-    msg: "{{ _oi_version.stdout_lines[0] }}"
+    msg: "{{ _oi_version.stdout_lines[0] | default('skipped in check mode') }}"
+  when: _oi_version.stdout_lines is defined
 
 - name: Check pull secret file exists
   ansible.builtin.stat:
@@ -86,21 +87,29 @@
   loop: "{{ groups['masters'] | default([]) + groups['workers'] | default([]) }}"
   when: hostvars[item].boot_method | default('manual') not in ['manual', 'redfish']
 
-- name: Check BMC variables for Redfish hosts
+- name: Check BMC address for Redfish hosts
   ansible.builtin.fail:
-    msg: >-
-      Host {{ item }} uses boot_method=redfish but is missing required variable '{{ _missing_var }}'.
-      Required: bmc_address, bmc_user, bmc_password
+    msg: "Host {{ item }} uses boot_method=redfish but bmc_address is not defined."
   loop: "{{ groups['masters'] | default([]) + groups['workers'] | default([]) }}"
-  vars:
-    _missing_var: >-
-      {%- if hostvars[item].bmc_address is not defined -%}bmc_address
-      {%- elif hostvars[item].bmc_user is not defined -%}bmc_user
-      {%- elif hostvars[item].bmc_password is not defined -%}bmc_password
-      {%- else -%}none{%- endif -%}
   when:
     - hostvars[item].boot_method | default('manual') == 'redfish'
-    - _missing_var != 'none'
+    - hostvars[item].bmc_address is not defined
+
+- name: Check BMC user for Redfish hosts
+  ansible.builtin.fail:
+    msg: "Host {{ item }} uses boot_method=redfish but bmc_user is not defined."
+  loop: "{{ groups['masters'] | default([]) + groups['workers'] | default([]) }}"
+  when:
+    - hostvars[item].boot_method | default('manual') == 'redfish'
+    - hostvars[item].bmc_user is not defined
+
+- name: Check BMC password for Redfish hosts
+  ansible.builtin.fail:
+    msg: "Host {{ item }} uses boot_method=redfish but bmc_password is not defined."
+  loop: "{{ groups['masters'] | default([]) + groups['workers'] | default([]) }}"
+  when:
+    - hostvars[item].boot_method | default('manual') == 'redfish'
+    - hostvars[item].bmc_password is not defined
 
 - name: Preflight summary
   ansible.builtin.debug:
@@ -112,5 +121,5 @@
       - "Disconnected: {{ disconnected }}"
       - "Masters: {{ _master_count }}"
       - "Workers: {{ _worker_count }}"
-      - "openshift-install: {{ _oi_version.stdout_lines[0] }}"
+      - "openshift-install: {{ _oi_version.stdout_lines[0] | default('unknown') }}"
       - "-------------------------"
