@@ -1,23 +1,17 @@
 ---
 - name: Determine API endpoint IPs
   ansible.builtin.set_fact:
-    _api_ips: >-
-      {% if api_vip | length > 0 %}
-      {{ [api_vip] }}
-      {% else %}
-      {{ groups['masters'] | map('extract', hostvars, 'ansible_host') | list }}
-      {% endif %}
+    _api_ips: "{{ [api_vip] if (api_vip | default('') | length > 0) else groups['masters'] | map('extract', hostvars, 'ansible_host') | list }}"
 
 - name: Determine ingress endpoint IPs
   ansible.builtin.set_fact:
     _ingress_ips: >-
-      {% if ingress_vip | length > 0 %}
-      {{ [ingress_vip] }}
-      {% elif cluster_topology == 'sno' or cluster_topology == 'compact' %}
-      {{ groups['masters'] | map('extract', hostvars, 'ansible_host') | list }}
-      {% else %}
-      {{ groups['workers'] | map('extract', hostvars, 'ansible_host') | list }}
-      {% endif %}
+      {{
+        [ingress_vip] if (ingress_vip | default('') | length > 0)
+        else (groups['masters'] | map('extract', hostvars, 'ansible_host') | list)
+             if (cluster_topology == 'sno' or cluster_topology == 'compact')
+        else (groups['workers'] | map('extract', hostvars, 'ansible_host') | list)
+      }}
 
 - name: Create api A record
   amazon.aws.route53:

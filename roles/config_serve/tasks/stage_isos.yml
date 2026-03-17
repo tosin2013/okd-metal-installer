@@ -5,6 +5,17 @@
     patterns: "*.iso"
   register: _iso_files
 
+- name: Ensure source ISO files are world-readable for symlink serving
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    mode: "0644"
+  loop: "{{ _iso_files.files }}"
+  loop_control:
+    label: "{{ item.path | basename }}"
+  when:
+    - _iso_files.files | length > 0
+    - iso_use_symlinks | bool
+
 - name: Symlink ISO files to serving directory
   ansible.builtin.file:
     src: "{{ item.path }}"

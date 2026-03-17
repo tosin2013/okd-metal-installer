@@ -83,9 +83,9 @@
   ansible.builtin.fail:
     msg: >-
       Invalid boot_method '{{ hostvars[item].boot_method | default("manual") }}'
-      for host {{ item }}. Must be 'manual' or 'redfish'.
+      for host {{ item }}. Must be 'manual', 'redfish', or 'hetzner'.
   loop: "{{ groups['masters'] | default([]) + groups['workers'] | default([]) }}"
-  when: hostvars[item].boot_method | default('manual') not in ['manual', 'redfish']
+  when: hostvars[item].boot_method | default('manual') not in ['manual', 'redfish', 'hetzner']
 
 - name: Check BMC address for Redfish hosts
   ansible.builtin.fail:
@@ -110,6 +110,18 @@
   when:
     - hostvars[item].boot_method | default('manual') == 'redfish'
     - hostvars[item].bmc_password is not defined
+
+- name: Check Hetzner Robot credentials for Hetzner hosts
+  ansible.builtin.fail:
+    msg: >-
+      Hosts use boot_method=hetzner but hetzner_robot_user or hetzner_robot_password is not set.
+      Provide via vault or extra-vars.
+  when:
+    - _hetzner_hosts | length > 0
+    - (hetzner_robot_user | default('') | length == 0) or (hetzner_robot_password | default('') | length == 0)
+  vars:
+    _all_hosts: "{{ groups['masters'] | default([]) + groups['workers'] | default([]) }}"
+    _hetzner_hosts: "{{ _all_hosts | map('extract', hostvars, 'boot_method') | select('equalto', 'hetzner') | list }}"
 
 - name: Preflight summary
   ansible.builtin.debug:

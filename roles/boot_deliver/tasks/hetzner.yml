@@ -1,0 +1,199 @@
+---
+- name: Validate Hetzner Robot credentials are provided
+  ansible.builtin.fail:
+    msg: "hetzner_robot_user and hetzner_robot_password must be set for boot_method=hetzner"
+  when: hetzner_robot_user | length == 0 or hetzner_robot_password | length == 0
+  delegate_to: localhost
+
+- name: Get server info from Hetzner Robot API
+  ansible.builtin.uri:
+    url: "{{ hetzner_robot_api }}/server/{{ ansible_host }}"
+    method: GET
+    user: "{{ hetzner_robot_user }}"
+    password: "{{ hetzner_robot_password }}"
+    force_basic_auth: true
+    status_code: 200
+  register: _hetzner_server
+  delegate_to: localhost
+
+- name: Report target server
+  ansible.builtin.debug:
+    msg: "Hetzner server {{ ansible_host }} (DC: {{ _hetzner_server.json.server.dc }}, status: {{ _hetzner_server.json.server.status }})"
+
+- name: Activate rescue mode via Hetzner Robot API
+  ansible.builtin.uri:
+    url: "{{ hetzner_robot_api }}/boot/{{ ansible_host }}/rescue"
+    method: POST
+    user: "{{ hetzner_robot_user }}"
+    password: "{{ hetzner_robot_password }}"
+    force_basic_auth: true
+    body_format: form-urlencoded
+    body:
+      os: "{{ hetzner_rescue_os }}"
+      arch: "64"
+      authorized_key[]: "{{ hetzner_ssh_key_fingerprint }}"
+    status_code: 200
+  register: _rescue_activate
+  delegate_to: localhost
+
+- name: Report rescue activation
+  ansible.builtin.debug:
+    msg: "Rescue activated for {{ ansible_host }} with SSH key {{ hetzner_ssh_key_fingerprint }}"
+
+- name: Hardware reset server to boot into rescue
+  ansible.builtin.uri:
+    url: "{{ hetzner_robot_api }}/reset/{{ ansible_host }}"
+    method: POST
+    user: "{{ hetzner_robot_user }}"
+    password: "{{ hetzner_robot_password }}"
+    force_basic_auth: true
+    body_format: form-urlencoded
+    body:
+      type: hw
+    status_code: 200
+  register: _hw_reset
+  delegate_to: localhost
+
+- name: Wait for server to go down (confirm reboot started)
+  ansible.builtin.wait_for:
+    host: "{{ ansible_host }}"
+    port: 22
+    timeout: 120
+    delay: 5
+    state: stopped
+  delegate_to: localhost
+  failed_when: false
+
+- name: Wait for rescue system to become reachable via SSH
+  ansible.builtin.wait_for:
+    host: "{{ ansible_host }}"
+    port: 22
+    timeout: "{{ hetzner_rescue_wait_timeout }}"
+    delay: 10
+    state: started
+  delegate_to: localhost
+
+- name: Wait for rescue SSH to fully initialize
+  ansible.builtin.pause:
+    seconds: 15
+
+- name: Verify rescue system is running
+  ansible.builtin.command:
+    cmd: >-
+      ssh {{ hetzner_ssh_opts }} root@{{ ansible_host }} cat /etc/hostname
+  register: _rescue_hostname
+  delegate_to: localhost
+  changed_when: false
+
+- name: Report rescue system status
+  ansible.builtin.debug:
+    msg: "Rescue system ready: {{ _rescue_hostname.stdout | trim }}"
+
+- name: Discover all disk devices in rescue
+  ansible.builtin.command:
+    cmd: >-
+      ssh {{ hetzner_ssh_opts }} root@{{ ansible_host }}
+      lsblk -dnp -o NAME,SIZE,TYPE
+  register: _rescue_disks
+  delegate_to: localhost
+  changed_when: false
+
+- name: Report discovered disks
+  ansible.builtin.debug:
+    msg: "{{ _rescue_disks.stdout_lines }}"
+
+- name: Wipe all disks to ensure clean boot state
+  ansible.builtin.command:
+    cmd: >-
+      ssh {{ hetzner_ssh_opts }} root@{{ ansible_host }}
+      bash -c 'for d in $(lsblk -dnp -o NAME | grep -v loop); do wipefs -af $d; sgdisk --zap-all $d 2>/dev/null; dd if=/dev/zero of=$d bs=1M count=100 conv=notrunc 2>/dev/null; echo "Wiped $d"; done'
+  delegate_to: localhost
+  changed_when: true
+
+- name: Download customized ISO to rescue system
+  ansible.builtin.command:
+    cmd: >-
+      ssh {{ hetzner_ssh_opts }} root@{{ ansible_host }}
+      wget -q --show-progress -O /tmp/node.iso
+      http://{{ jumpbox_ip }}:{{ config_serve_port }}/iso/{{ inventory_hostname }}.iso
+  delegate_to: localhost
+  changed_when: true
+
+- name: Write ISO to disk on target server
+  ansible.builtin.command:
+    cmd: >-
+      ssh {{ hetzner_ssh_opts }} root@{{ ansible_host }}
+      bash -c 'dd if=/tmp/node.iso of={{ hostvars[inventory_hostname].dest_device | default(dest_device) }} bs=4M status=progress && sync'
+  delegate_to: localhost
+  changed_when: true
+  register: _dd_result
+
+- name: Report dd result
+  ansible.builtin.debug:
+    msg: "ISO written to {{ hostvars[inventory_hostname].dest_device | default(dest_device) }}: {{ _dd_result.stderr_lines | last | default('done') }}"
+
+- name: Deactivate rescue mode
+  ansible.builtin.uri:
+    url: "{{ hetzner_robot_api }}/boot/{{ ansible_host }}/rescue"
+    method: DELETE
+    user: "{{ hetzner_robot_user }}"
+    password: "{{ hetzner_robot_password }}"
+    force_basic_auth: true
+    status_code: 200
+  delegate_to: localhost
+
+- name: Hardware reset server to boot CoreOS from disk
+  ansible.builtin.uri:
+    url: "{{ hetzner_robot_api }}/reset/{{ ansible_host }}"
+    method: POST
+    user: "{{ hetzner_robot_user }}"
+    password: "{{ hetzner_robot_password }}"
+    force_basic_auth: true
+    body_format: form-urlencoded
+    body:
+      type: hw
+    status_code: 200
+  delegate_to: localhost
+
+- name: Wait for rescue system to go down after reset
+  ansible.builtin.wait_for:
+    host: "{{ ansible_host }}"
+    port: 22
+    timeout: 120
+    delay: 5
+    state: stopped
+  delegate_to: localhost
+  failed_when: false
+
+- name: Display bootstrap progress message
+  ansible.builtin.debug:
+    msg:
+      - "============================================="
+      - "Server {{ ansible_host }} is now booting CoreOS live ISO from disk."
+      - "The bootstrap-in-place process will take ~30-45 minutes."
+      - ""
+      - "Monitor progress with:"
+      - "  openshift-install wait-for bootstrap-complete --dir={{ ignition_output_dir | replace(playbook_dir + '/../', '') }}/../.ignition-work"
+      - "============================================="
+
+- name: Wait for CoreOS node to become reachable via SSH
+  ansible.builtin.wait_for:
+    host: "{{ ansible_host }}"
+    port: "{{ boot_ssh_port }}"
+    timeout: "{{ boot_wait_timeout }}"
+    delay: 120
+    state: started
+  register: _ssh_wait
+  failed_when: false
+  delegate_to: localhost
+
+- name: Report boot status
+  ansible.builtin.debug:
+    msg: >-
+      {% if _ssh_wait.state is defined and _ssh_wait.state == 'started' %}
+      Node {{ inventory_hostname }} ({{ ansible_host }}) is reachable on port {{ boot_ssh_port }}.
+      CoreOS has booted. OKD bootstrap may still be in progress.
+      {% else %}
+      WARNING: Node {{ inventory_hostname }} did not become reachable within {{ boot_wait_timeout }}s.
+      Check server console via Hetzner Robot panel or VNC.
+      {% endif %}

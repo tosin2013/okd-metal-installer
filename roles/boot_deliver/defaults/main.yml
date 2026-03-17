@@ -4,12 +4,21 @@ boot_method: manual
 # ISO location (set by iso_customize role, or override manually)
 iso_output_dir: "{{ playbook_dir }}/../iso-output"
 
-# Jumpbox IP for Redfish virtual media URL (ISO served via HTTP)
+# Jumpbox IP for Redfish/Hetzner virtual media URL (ISO served via HTTP)
 jumpbox_ip: "{{ ansible_default_ipv4.address | default('127.0.0.1') }}"
 config_serve_port: 8080
 
 # Redfish connection defaults
 bmc_timeout: 30
+
+# Hetzner Robot API defaults
+hetzner_robot_user: ""
+hetzner_robot_password: ""
+hetzner_robot_api: "https://robot-ws.your-server.de"
+hetzner_rescue_os: "linux"
+hetzner_rescue_wait_timeout: 300
+hetzner_ssh_key_fingerprint: ""
+hetzner_ssh_opts: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -i ~/.ssh/id_ed25519"
 
 # Post-boot validation
 boot_wait_timeout: 600

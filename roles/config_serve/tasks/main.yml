@@ -34,6 +34,16 @@
 - name: Stage ignition configs
   ansible.builtin.include_tasks: stage_configs.yml
 
+- name: Ensure source directories are traversable for symlinked serving
+  ansible.builtin.file:
+    path: "{{ item }}"
+    mode: "o+rx"
+  loop:
+    - "{{ iso_output_dir }}"
+    - "{{ iso_output_dir | dirname }}"
+  when: iso_use_symlinks | bool
+  failed_when: false
+
 - name: Stage ISO images
   ansible.builtin.include_tasks: stage_isos.yml
 

@@ -38,7 +38,7 @@
     password: "{{ bmc_password }}"
     timeout: "{{ bmc_timeout }}"
     virtual_media:
-      image_url: "http://{{ jumpbox_ip }}:{{ config_serve_port }}/{{ inventory_hostname }}.iso"
+      image_url: "http://{{ jumpbox_ip }}:{{ config_serve_port }}/iso/{{ inventory_hostname }}.iso"
       media_types:
         - CD
         - DVD

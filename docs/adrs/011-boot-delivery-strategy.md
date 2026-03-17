@@ -18,7 +18,7 @@ A single boot delivery mechanism cannot cover all scenarios. The tool must suppo
 
 ## Decision
 
-Implement two boot delivery modes, selectable per-host via the Ansible inventory variable `boot_method`:
+Implement three boot delivery modes, selectable per-host via the Ansible inventory variable `boot_method`:
 
 ### Mode 1: Manual (`boot_method: manual`) -- Default
 
@@ -47,6 +47,29 @@ Required per-host inventory variables for Redfish mode:
 - `bmc_user`: BMC credentials username
 - `bmc_password`: BMC credentials password (recommend Ansible Vault)
 
+### Mode 3: Hetzner Robot (`boot_method: hetzner`)
+
+For Hetzner dedicated servers that lack Redfish/IPMI virtual media, the Hetzner Robot API provides an alternative automation path:
+
+1. Ansible registers an SSH public key with the Hetzner Robot API (if not already registered)
+2. Activates the Hetzner Linux rescue system via `POST /boot/{server-ip}/rescue`
+3. Performs a hardware reset via `POST /reset/{server-ip}` to boot into rescue
+4. Waits for the rescue system to become reachable via SSH
+5. **Wipes all disks** in the rescue system to prevent boot order confusion on multi-disk servers (critical for servers with multiple NVMe drives)
+6. Downloads the customized ISO from the jumpbox's config HTTP server to the rescue system via `wget`
+7. Writes the ISO directly to the target boot disk using `dd`
+8. Deactivates rescue mode via `DELETE /boot/{server-ip}/rescue`
+9. Hardware resets the server to boot CoreOS from the written disk
+10. Waits for the CoreOS node to become reachable via SSH
+
+Required per-host inventory variables for Hetzner mode:
+- `hetzner_robot_user`: Robot webservice username (recommend Ansible Vault)
+- `hetzner_robot_password`: Robot webservice password (recommend Ansible Vault)
+- `hetzner_ssh_key_fingerprint`: Fingerprint of the SSH key registered with Robot
+- `dest_device`: Target disk device path (e.g., `/dev/nvme0n1`)
+
+**Multi-disk consideration**: Hetzner auction/dedicated servers frequently have multiple identical drives. The disk wipe step (introduced after a failed first deployment) ensures that only the target disk contains bootable data, preventing EFI boot order confusion after `coreos-installer install` rewrites the partition table during bootstrap-in-place.
+
 ### Compatible BMC Firmware (Redfish)
 
 | Vendor | BMC | Minimum Version | Virtual Media | Notes |
@@ -64,10 +87,11 @@ Required per-host inventory variables for Redfish mode:
 
 - Manual mode ensures OKD-Metal works on any hardware, including homelabs and auction servers
 - Redfish mode enables full hands-off automation for compatible hardware
-- Per-host selection allows mixed environments (some nodes Redfish, some manual)
+- Hetzner mode enables full automation for Hetzner dedicated servers without Redfish
+- Per-host selection allows mixed environments (some nodes Redfish, some manual, some Hetzner)
 - `community.general.redfish_command` is a mature, well-tested Ansible module
 - Ansible pause provides a clean operator handoff point without breaking the playbook flow
-- No custom BMC tooling to maintain; leverages standard Redfish protocol
+- No custom BMC tooling to maintain; leverages standard Redfish protocol and vendor APIs
 
 ### Negative
 
@@ -76,15 +100,18 @@ Required per-host inventory variables for Redfish mode:
 - BMC credentials must be securely managed (Ansible Vault recommended)
 - Virtual media ISO URL must be HTTP-reachable from the BMC network (network topology constraint)
 - No IPMI fallback for servers with IPMI but not Redfish (could be added later)
+- Hetzner mode requires the jumpbox HTTP server to be reachable from the rescue system (same Hetzner network)
+- Hetzner Robot API credentials grant broad server control -- must be vaulted
 
 ## Implementation Plan
 
 1. Create `roles/boot_deliver/` Ansible role with `boot_method` conditional branching
 2. Implement manual path with `ansible.builtin.pause` and informational `debug` messages
 3. Implement Redfish path using `community.general.redfish_command` for virtual media insert, boot device set, and power control
-4. Add BMC credential variables to inventory schema and document Vault usage
-5. Add post-boot SSH reachability check as validation gate
-6. Integrate into `playbooks/site.yml` after ISO customization step
+4. Implement Hetzner path using `ansible.builtin.uri` for Robot API calls and SSH for rescue system operations
+5. Add BMC/API credential variables to inventory schema and document Vault usage
+6. Add post-boot SSH reachability check as validation gate
+7. Integrate into `playbooks/site.yml` after ISO customization step
 
 ## Related ADRs
 
@@ -97,3 +124,4 @@ Required per-host inventory variables for Redfish mode:
 - DMTF Redfish specification: https://www.dmtf.org/standards/redfish
 - Ansible redfish_command module: https://docs.ansible.com/ansible/latest/collections/community/general/redfish_command_module.html
 - Ansible redfish_info module: https://docs.ansible.com/ansible/latest/collections/community/general/redfish_info_module.html
+- Hetzner Robot API documentation: https://robot.your-server.de/doc/webservice/en.html

@@ -11,6 +11,8 @@ __pycache__/
 .mcp-server-context.md
 
 # Secrets (never commit)
+.env
+.vault_password
 *.vault
 vault_password_file
 pull-secret.json

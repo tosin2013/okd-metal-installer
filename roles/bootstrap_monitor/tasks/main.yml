@@ -1,0 +1,138 @@
+---
+- name: Set KUBECONFIG path
+  ansible.builtin.set_fact:
+    _kubeconfig: "{{ ignition_output_dir }}/auth/kubeconfig"
+
+- name: Check kubeconfig exists
+  ansible.builtin.stat:
+    path: "{{ _kubeconfig }}"
+  register: _kc_stat
+
+- name: Fail if kubeconfig not found
+  ansible.builtin.fail:
+    msg: "kubeconfig not found at {{ _kubeconfig }}. Run ignition_generate first."
+  when: not _kc_stat.stat.exists
+
+- name: Wait for Kubernetes API to become available
+  ansible.builtin.uri:
+    url: "https://api.{{ cluster_name }}.{{ base_domain }}:6443/healthz"
+    method: GET
+    validate_certs: false
+    status_code: [200, 401, 403]
+    timeout: 10
+  register: _api_health
+  until: _api_health.status is defined and _api_health.status in [200, 401, 403]
+  retries: "{{ (bootstrap_api_poll_timeout | int / bootstrap_api_poll_interval | int) | int }}"
+  delay: "{{ bootstrap_api_poll_interval }}"
+  failed_when: false
+
+- name: Report API availability
+  ansible.builtin.debug:
+    msg: >-
+      {% if _api_health.status is defined and _api_health.status in [200, 401, 403] %}
+      Kubernetes API is responding (status {{ _api_health.status }}).
+      {% else %}
+      WARNING: API did not become available within {{ bootstrap_api_poll_timeout }}s.
+      {% endif %}
+
+- name: Wait for bootstrap to complete
+  ansible.builtin.command:
+    cmd: >-
+      {{ openshift_install_binary }} wait-for bootstrap-complete
+      --dir={{ ignition_work_dir }}
+      --log-level=info
+  environment:
+    KUBECONFIG: "{{ _kubeconfig }}"
+  async: "{{ bootstrap_complete_timeout }}"
+  poll: 30
+  register: _bootstrap_result
+  failed_when: false
+  changed_when: false
+
+- name: Report bootstrap result
+  ansible.builtin.debug:
+    msg: >-
+      {% if _bootstrap_result.rc is defined and _bootstrap_result.rc == 0 %}
+      Bootstrap COMPLETE. Proceeding to install completion monitoring.
+      {% else %}
+      Bootstrap did not complete successfully (rc={{ _bootstrap_result.rc | default('unknown') }}).
+      stderr: {{ _bootstrap_result.stderr | default('none') | trim }}
+      {% endif %}
+
+- name: Fail if bootstrap did not complete
+  ansible.builtin.fail:
+    msg: "Bootstrap failed. Check node console and logs."
+  when: _bootstrap_result.rc is not defined or _bootstrap_result.rc != 0
+
+- name: Wait for install to complete
+  ansible.builtin.command:
+    cmd: >-
+      {{ openshift_install_binary }} wait-for install-complete
+      --dir={{ ignition_work_dir }}
+      --log-level=info
+  environment:
+    KUBECONFIG: "{{ _kubeconfig }}"
+  async: "{{ install_complete_timeout }}"
+  poll: 30
+  register: _install_result
+  failed_when: false
+  changed_when: false
+
+- name: Report install result
+  ansible.builtin.debug:
+    msg: >-
+      {% if _install_result.rc is defined and _install_result.rc == 0 %}
+      Install COMPLETE.
+      {% else %}
+      Install did not complete within timeout (rc={{ _install_result.rc | default('unknown') }}).
+      This may be normal -- some operators take time to stabilize.
+      {% endif %}
+
+- name: Gather cluster node status
+  ansible.builtin.command:
+    cmd: oc get nodes -o wide
+  environment:
+    KUBECONFIG: "{{ _kubeconfig }}"
+  register: _nodes
+  changed_when: false
+  failed_when: false
+
+- name: Gather cluster version
+  ansible.builtin.command:
+    cmd: oc get clusterversion
+  environment:
+    KUBECONFIG: "{{ _kubeconfig }}"
+  register: _cv
+  changed_when: false
+  failed_when: false
+
+- name: Gather cluster operators
+  ansible.builtin.command:
+    cmd: oc get clusteroperators
+  environment:
+    KUBECONFIG: "{{ _kubeconfig }}"
+  register: _co
+  changed_when: false
+  failed_when: false
+
+- name: Cluster validation report
+  ansible.builtin.debug:
+    msg:
+      - "============================================="
+      - "       OKD CLUSTER DEPLOYMENT REPORT"
+      - "============================================="
+      - ""
+      - "--- Nodes ---"
+      - "{{ _nodes.stdout | default('unable to retrieve') }}"
+      - ""
+      - "--- Cluster Version ---"
+      - "{{ _cv.stdout | default('unable to retrieve') }}"
+      - ""
+      - "--- Cluster Operators ---"
+      - "{{ _co.stdout | default('unable to retrieve') }}"
+      - ""
+      - "--- Access ---"
+      - "KUBECONFIG: {{ _kubeconfig }}"
+      - "Console: https://console-openshift-console.apps.{{ cluster_name }}.{{ base_domain }}"
+      - "API: https://api.{{ cluster_name }}.{{ base_domain }}:6443"
+      - "============================================="

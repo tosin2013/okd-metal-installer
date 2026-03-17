@@ -6,9 +6,12 @@
       in group_vars/all.yml or pass it as an extra variable.
   when: route53_zone_id | length == 0
 
-- name: Verify AWS credentials
-  amazon.aws.aws_caller_identity_info:
+- name: Verify AWS credentials via STS
+  ansible.builtin.command:
+    cmd: >-
+      python3 -c "import boto3; r=boto3.client('sts').get_caller_identity(); print(r['Arn'])"
   register: _aws_identity
+  changed_when: false
   failed_when: false
 
 - name: Fail if AWS credentials are invalid
@@ -17,9 +20,9 @@
       AWS credentials not configured or invalid.
       Set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY environment variables,
       or configure credentials via Ansible Vault variables.
-  when: _aws_identity is failed
+  when: _aws_identity.rc != 0
 
 - name: Report AWS identity
   ansible.builtin.debug:
-    msg: "AWS authenticated as: {{ _aws_identity.arn | default('unknown') }} (account {{ _aws_identity.account | default('unknown') }})"
-  when: _aws_identity is not failed
+    msg: "AWS authenticated as: {{ _aws_identity.stdout | trim }}"
+  when: _aws_identity.rc == 0

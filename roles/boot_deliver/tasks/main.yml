@@ -6,3 +6,7 @@
 - name: Boot delivery via Redfish virtual media
   ansible.builtin.include_tasks: redfish.yml
   when: boot_method == 'redfish'
+
+- name: Boot delivery via Hetzner Robot rescue
+  ansible.builtin.include_tasks: hetzner.yml
+  when: boot_method == 'hetzner'

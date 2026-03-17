@@ -10,7 +10,8 @@
 #   4. ISO customization -- build per-host bootable ISOs (on jumpbox)
 #   5. Config serving -- nginx HTTP server for Ignition and ISOs (on jumpbox)
 #   6. DNS configuration -- Route 53 or internal dnsmasq (on jumpbox)
-#   7. Boot delivery to target nodes (manual or Redfish)
+#   7. Boot delivery to target nodes (manual, Redfish, or Hetzner)
+#   8. Bootstrap monitoring and cluster validation (on jumpbox)
 
 - name: "Phase 0: Disconnected preparation (mirror registry + release mirror)"
   hosts: localhost
@@ -78,3 +79,11 @@
   serial: 1
   roles:
     - boot_deliver
+
+- name: "Phase 7: Monitor bootstrap and validate cluster"
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  become: false
+  roles:
+    - bootstrap_monitor
