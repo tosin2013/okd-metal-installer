@@ -17,3 +17,11 @@ jumpbox_packages:
   - firewalld
   - firefox
   - xterm
+
+# OKD cluster tooling (P6-02)
+okd_version: "4.21.0-okd-scos.8"
+okd_release_base_url: "https://github.com/okd-project/okd/releases/download"
+cluster_tools_dir: /usr/local/bin
+
+cluster_tools_packages:
+  - coreos-installer

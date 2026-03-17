@@ -1,0 +1,10 @@
+---
+network_output_dir: "{{ playbook_dir }}/../network-output"
+
+# Default DNS servers (overridden per-interface in host_vars)
+default_dns_servers:
+  - "8.8.8.8"
+  - "8.8.4.4"
+
+# Default IPv6 method for generated connections
+default_ipv6_method: disabled

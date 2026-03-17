@@ -91,3 +91,6 @@
     state: started
     enabled: true
     daemon_reload: true
+
+- name: Install OKD cluster tooling
+  ansible.builtin.include_tasks: cluster_tools.yml

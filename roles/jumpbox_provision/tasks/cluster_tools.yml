@@ -1,0 +1,90 @@
+---
+- name: Install coreos-installer from AppStream repo
+  ansible.builtin.dnf:
+    name: "{{ cluster_tools_packages }}"
+    state: present
+
+- name: Check if openshift-install is already installed at target version
+  ansible.builtin.command:
+    cmd: "{{ cluster_tools_dir }}/openshift-install version"
+  register: _oi_current
+  changed_when: false
+  failed_when: false
+
+- name: Download openshift-install tarball
+  ansible.builtin.get_url:
+    url: "{{ okd_release_base_url }}/{{ okd_version }}/openshift-install-linux-{{ okd_version }}.tar.gz"
+    dest: "/tmp/openshift-install-linux-{{ okd_version }}.tar.gz"
+    mode: "0644"
+  when: _oi_current.rc != 0 or okd_version not in (_oi_current.stdout | default(''))
+
+- name: Extract openshift-install
+  ansible.builtin.unarchive:
+    src: "/tmp/openshift-install-linux-{{ okd_version }}.tar.gz"
+    dest: "{{ cluster_tools_dir }}"
+    remote_src: true
+    extra_opts:
+      - --no-anchored
+      - openshift-install
+  when: _oi_current.rc != 0 or okd_version not in (_oi_current.stdout | default(''))
+
+- name: Check if oc is already installed at target version
+  ansible.builtin.command:
+    cmd: "{{ cluster_tools_dir }}/oc version --client"
+  register: _oc_current
+  changed_when: false
+  failed_when: false
+
+- name: Download openshift-client tarball
+  ansible.builtin.get_url:
+    url: "{{ okd_release_base_url }}/{{ okd_version }}/openshift-client-linux-{{ okd_version }}.tar.gz"
+    dest: "/tmp/openshift-client-linux-{{ okd_version }}.tar.gz"
+    mode: "0644"
+  when: _oc_current.rc != 0 or okd_version not in (_oc_current.stdout | default(''))
+
+- name: Extract oc and kubectl
+  ansible.builtin.unarchive:
+    src: "/tmp/openshift-client-linux-{{ okd_version }}.tar.gz"
+    dest: "{{ cluster_tools_dir }}"
+    remote_src: true
+    extra_opts:
+      - --no-anchored
+      - oc
+      - kubectl
+  when: _oc_current.rc != 0 or okd_version not in (_oc_current.stdout | default(''))
+
+- name: Set executable permissions on cluster tools
+  ansible.builtin.file:
+    path: "{{ cluster_tools_dir }}/{{ item }}"
+    mode: "0755"
+  loop:
+    - openshift-install
+    - oc
+    - kubectl
+
+- name: Verify openshift-install
+  ansible.builtin.command:
+    cmd: "{{ cluster_tools_dir }}/openshift-install version"
+  register: _oi_verify
+  changed_when: false
+
+- name: Verify oc
+  ansible.builtin.command:
+    cmd: "{{ cluster_tools_dir }}/oc version --client"
+  register: _oc_verify
+  changed_when: false
+
+- name: Verify coreos-installer
+  ansible.builtin.command:
+    cmd: coreos-installer --version
+  register: _ci_verify
+  changed_when: false
+
+- name: Report installed cluster tools
+  ansible.builtin.debug:
+    msg:
+      - "--- Cluster Tools Installed ---"
+      - "{{ _oi_verify.stdout_lines[0] }}"
+      - "{{ _oc_verify.stdout_lines[0] }}"
+      - "{{ _ci_verify.stdout }}"
+      - "-------------------------------"

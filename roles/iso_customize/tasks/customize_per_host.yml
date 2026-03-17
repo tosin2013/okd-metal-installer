@@ -1,0 +1,63 @@
+---
+- name: Determine ignition file for {{ _current_host }}
+  ansible.builtin.set_fact:
+    _host_role: "{{ hostvars[_current_host].group_names | intersect(['masters']) | length > 0 | ternary('master', 'worker') }}"
+
+- name: Set ignition source file for {{ _current_host }}
+  ansible.builtin.set_fact:
+    _ignition_file: >-
+      {% if cluster_topology == 'sno' %}
+      {{ ignition_output_dir }}/bootstrap-in-place-for-live-iso.ign
+      {% elif _host_role == 'master' %}
+      {{ ignition_output_dir }}/master.ign
+      {% else %}
+      {{ ignition_output_dir }}/worker.ign
+      {% endif %}
+
+- name: Check ignition file exists for {{ _current_host }}
+  ansible.builtin.stat:
+    path: "{{ _ignition_file | trim }}"
+  register: _ign_stat
+
+- name: Fail if ignition file missing for {{ _current_host }}
+  ansible.builtin.fail:
+    msg: "Ignition file not found: {{ _ignition_file | trim }}. Run ignition_generate role first."
+  when: not _ign_stat.stat.exists
+
+- name: Collect network keyfiles for {{ _current_host }}
+  ansible.builtin.find:
+    paths: "{{ network_output_dir }}/{{ _current_host }}"
+    patterns: "*.nmconnection"
+  register: _network_keyfiles
+  failed_when: false
+
+- name: Build coreos-installer iso customize command for {{ _current_host }}
+  ansible.builtin.set_fact:
+    _customize_cmd: >-
+      coreos-installer iso customize
+      --dest-device {{ hostvars[_current_host].dest_device | default(dest_device) }}
+      --dest-ignition {{ _ignition_file | trim }}
+      {% for keyfile in _network_keyfiles.files | default([]) %}
+      --network-keyfile {{ keyfile.path }}
+      {% endfor %}
+      {% if additional_trust_bundle_path | length > 0 %}
+      --dest-ca-cert {{ additional_trust_bundle_path }}
+      {% endif %}
+      --post-install {{ playbook_dir }}/../files/discovery-agent.sh
+      -o {{ iso_output_dir }}/{{ _current_host }}.iso
+      {{ iso_cache_dir }}/{{ _iso_filename }}
+
+- name: Check if custom ISO already exists for {{ _current_host }}
+  ansible.builtin.stat:
+    path: "{{ iso_output_dir }}/{{ _current_host }}.iso"
+  register: _custom_iso
+
+- name: Build custom ISO for {{ _current_host }}
+  ansible.builtin.command:
+    cmd: "{{ _customize_cmd }}"
+  when: not _custom_iso.stat.exists or _force_iso_rebuild | default(false) | bool
+  changed_when: true
+
+- name: Report ISO for {{ _current_host }}
+  ansible.builtin.debug:
+    msg: "Custom ISO ready: {{ iso_output_dir }}/{{ _current_host }}.iso (role: {{ _host_role }}, ignition: {{ _ignition_file | trim | basename }})"

@@ -1,0 +1,26 @@
+---
+- name: Generate nmconnection files for {{ _current_host }}
+  ansible.builtin.template:
+    src: "nmconnection-{{ iface.type | default('ethernet') }}.j2"
+    dest: "{{ network_output_dir }}/{{ _current_host }}/{{ iface.name }}.nmconnection"
+    mode: "0600"
+  loop: "{{ hostvars[_current_host].network_interfaces }}"
+  loop_control:
+    loop_var: iface
+    label: "{{ _current_host }}:{{ iface.name }}"
+
+- name: Generate bond member connections for {{ _current_host }}
+  ansible.builtin.template:
+    src: nmconnection-bond-member.j2
+    dest: "{{ network_output_dir }}/{{ _current_host }}/{{ member }}.nmconnection"
+    mode: "0600"
+  loop: "{{ hostvars[_current_host].network_interfaces | selectattr('type', 'equalto', 'bond') | map(attribute='bond_members') | flatten }}"
+  loop_control:
+    loop_var: member
+    label: "{{ _current_host }}:{{ member }}"
+  vars:
+    _parent_bond: >-
+      {{ hostvars[_current_host].network_interfaces |
+         selectattr('type', 'equalto', 'bond') |
+         selectattr('bond_members', 'contains', member) | first }}
+  when: hostvars[_current_host].network_interfaces | selectattr('type', 'defined') | selectattr('type', 'equalto', 'bond') | list | length > 0

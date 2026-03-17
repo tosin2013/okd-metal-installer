@@ -1,0 +1,9 @@
+[connection]
+id={{ member }}
+type=ethernet
+interface-name={{ member }}
+master={{ _parent_bond.name }}
+slave-type=bond
+autoconnect=true
+
+[ethernet]

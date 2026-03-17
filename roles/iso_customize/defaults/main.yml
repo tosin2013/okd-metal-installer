@@ -1,0 +1,24 @@
+---
+# SCOS (CentOS Stream CoreOS) ISO -- default for OKD SCOS releases
+scos_iso_url: "https://builds.coreos.fedoraproject.org/prod/streams/stable/builds/{{ scos_build_id }}/x86_64/scos-{{ scos_build_id }}-live.x86_64.iso"
+scos_build_id: "10.20250301.3.0"
+
+# FCOS (Fedora CoreOS) ISO -- for OKD FCOS releases
+fcos_iso_url: "https://builds.coreos.fedoraproject.org/prod/streams/stable/builds/{{ fcos_build_id }}/x86_64/fedora-coreos-{{ fcos_build_id }}-live.x86_64.iso"
+fcos_build_id: "41.20250301.3.0"
+
+iso_output_dir: "{{ playbook_dir }}/../iso-output"
+iso_cache_dir: "{{ playbook_dir }}/../.iso-cache"
+
+ignition_output_dir: "{{ playbook_dir }}/../ignition-output"
+network_output_dir: "{{ playbook_dir }}/../network-output"
+
+# Jumpbox serving config (for discovery agent phone-home)
+jumpbox_ip: "{{ ansible_default_ipv4.address | default('127.0.0.1') }}"
+config_serve_port: 8080
+
+# Target disk for CoreOS installation
+dest_device: /dev/sda
+
+# Additional CA certificate for disconnected mirrors
+additional_trust_bundle_path: ""

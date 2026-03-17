@@ -1,0 +1,34 @@
+---
+- name: Ensure ISO cache directory exists
+  ansible.builtin.file:
+    path: "{{ iso_cache_dir }}"
+    state: directory
+    mode: "0755"
+
+- name: Set ISO URL based on coreos_variant
+  ansible.builtin.set_fact:
+    _iso_url: "{{ scos_iso_url if coreos_variant == 'scos' else fcos_iso_url }}"
+    _iso_filename: "{{ 'scos' if coreos_variant == 'scos' else 'fcos' }}-live.x86_64.iso"
+
+- name: Check if base ISO already cached
+  ansible.builtin.stat:
+    path: "{{ iso_cache_dir }}/{{ _iso_filename }}"
+  register: _iso_cached
+
+- name: Download base ISO
+  ansible.builtin.get_url:
+    url: "{{ _iso_url }}"
+    dest: "{{ iso_cache_dir }}/{{ _iso_filename }}"
+    mode: "0644"
+    timeout: 600
+  when: not _iso_cached.stat.exists
+  register: _iso_download
+
+- name: Report ISO status
+  ansible.builtin.debug:
+    msg: >-
+      {% if _iso_download is changed %}
+      Downloaded {{ coreos_variant | upper }} ISO to {{ iso_cache_dir }}/{{ _iso_filename }}
+      {% else %}
+      Using cached {{ coreos_variant | upper }} ISO at {{ iso_cache_dir }}/{{ _iso_filename }}
+      {% endif %}

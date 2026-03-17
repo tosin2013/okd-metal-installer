@@ -5,11 +5,11 @@
 # Phases executed:
 #   1. Preflight validation and topology detection (on jumpbox)
 #   2. Ignition config generation (on jumpbox)
-#   3. Boot delivery to target nodes (manual or Redfish)
+#   3. Network configuration -- generate .nmconnection files (on jumpbox)
+#   4. ISO customization -- build per-host bootable ISOs (on jumpbox)
+#   5. Boot delivery to target nodes (manual or Redfish)
 #
 # Future phases (not yet implemented):
-#   - Network configuration (ADR-005)
-#   - ISO customization (ADR-002)
 #   - Config serving via HTTP (ADR-010)
 #   - DNS configuration (ADR-004)
 
@@ -22,7 +22,23 @@
     - preflight
     - ignition_generate
 
-- name: "Phase 2: Boot delivery to cluster nodes"
+- name: "Phase 2: Generate network configurations"
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  become: false
+  roles:
+    - network_configure
+
+- name: "Phase 3: Build custom ISOs"
+  hosts: localhost
+  connection: local
+  gather_facts: true
+  become: false
+  roles:
+    - iso_customize
+
+- name: "Phase 4: Boot delivery to cluster nodes"
   hosts: masters:workers
   gather_facts: false
   serial: 1

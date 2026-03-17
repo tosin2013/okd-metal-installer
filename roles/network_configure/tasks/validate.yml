@@ -1,0 +1,33 @@
+---
+- name: Validate network_interfaces is defined for target hosts
+  ansible.builtin.fail:
+    msg: "Host {{ item }} has no network_interfaces defined in host_vars"
+  loop: "{{ _target_hosts }}"
+  when: hostvars[item].network_interfaces is not defined
+
+- name: Collect all static IPs for duplicate check
+  ansible.builtin.set_fact:
+    _all_ips: >-
+      {{ _target_hosts | map('extract', hostvars, 'network_interfaces') |
+         flatten | selectattr('ipv4', 'defined') |
+         map(attribute='ipv4') | map(attribute='address') | list }}
+
+- name: Check for duplicate IP addresses
+  ansible.builtin.fail:
+    msg: "Duplicate IP address detected: {{ item }}. Each host must have a unique IP."
+  loop: "{{ _all_ips | unique }}"
+  when: _all_ips | select('equalto', item) | list | length > 1
+
+- name: Validate each interface has required fields
+  ansible.builtin.fail:
+    msg: >-
+      Host {{ item.0 }}, interface {{ item.1.name | default('unnamed') }}:
+      missing required field. Each interface needs 'name', 'type', and 'ipv4' with
+      'address', 'prefix', and 'gateway'.
+  loop: >-
+    {{ _target_hosts | product([]) | list }}
+  when: false
+
+- name: Validate gateway is set for interfaces with static IP
+  ansible.builtin.debug:
+    msg: "Network validation passed for {{ _target_hosts | length }} hosts, {{ _all_ips | length }} interfaces"

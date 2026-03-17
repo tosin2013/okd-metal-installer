@@ -1,0 +1,42 @@
+---
+- name: Determine target hosts for network configuration
+  ansible.builtin.set_fact:
+    _target_hosts: "{{ groups['masters'] | default([]) + groups['workers'] | default([]) }}"
+
+- name: Skip if no target hosts defined
+  ansible.builtin.debug:
+    msg: "No masters or workers in inventory -- skipping network configuration"
+  when: _target_hosts | length == 0
+
+- name: Run network validation
+  ansible.builtin.include_tasks: validate.yml
+  when: _target_hosts | length > 0
+
+- name: Ensure network output directory exists
+  ansible.builtin.file:
+    path: "{{ network_output_dir }}"
+    state: directory
+    mode: "0755"
+  when: _target_hosts | length > 0
+
+- name: Create per-host network output directories
+  ansible.builtin.file:
+    path: "{{ network_output_dir }}/{{ item }}"
+    state: directory
+    mode: "0755"
+  loop: "{{ _target_hosts }}"
+
+- name: Generate nmconnection files for each host
+  ansible.builtin.include_tasks: generate_host.yml
+  loop: "{{ _target_hosts }}"
+  loop_control:
+    loop_var: _current_host
+
+- name: Report generated network configurations
+  ansible.builtin.debug:
+    msg:
+      - "--- Network Configuration Complete ---"
+      - "Hosts configured: {{ _target_hosts | length }}"
+      - "Output directory: {{ network_output_dir }}"
+      - "--------------------------------------"
+  when: _target_hosts | length > 0

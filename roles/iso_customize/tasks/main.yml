@@ -1,0 +1,43 @@
+---
+- name: Determine target hosts for ISO generation
+  ansible.builtin.set_fact:
+    _target_hosts: "{{ groups['masters'] | default([]) + groups['workers'] | default([]) }}"
+
+- name: Skip if no target hosts defined
+  ansible.builtin.debug:
+    msg: "No masters or workers in inventory -- skipping ISO customization"
+  when: _target_hosts | length == 0
+
+- name: Ensure ISO output directory exists
+  ansible.builtin.file:
+    path: "{{ iso_output_dir }}"
+    state: directory
+    mode: "0755"
+  when: _target_hosts | length > 0
+
+- name: Ensure discovery agent is executable
+  ansible.builtin.file:
+    path: "{{ playbook_dir }}/../files/discovery-agent.sh"
+    mode: "0755"
+  when: _target_hosts | length > 0
+
+- name: Download base CoreOS ISO
+  ansible.builtin.include_tasks: download_iso.yml
+  when: _target_hosts | length > 0
+
+- name: Customize ISO for each host
+  ansible.builtin.include_tasks: customize_per_host.yml
+  loop: "{{ _target_hosts }}"
+  loop_control:
+    loop_var: _current_host
+  when: _target_hosts | length > 0
+
+- name: Report ISO generation summary
+  ansible.builtin.debug:
+    msg:
+      - "--- ISO Customization Complete ---"
+      - "Hosts: {{ _target_hosts | length }}"
+      - "Output: {{ iso_output_dir }}"
+      - "Base ISO: {{ coreos_variant | upper }}"
+      - "----------------------------------"
+  when: _target_hosts | length > 0
