@@ -216,17 +216,21 @@
     KUBECONFIG: "{{ _kubeconfig }}"
   changed_when: false
 
-- name: Create S3 Route for external access
-  when: seaweedfs_expose_route | default(true) | bool
-  block:
-    - name: Get cluster apps domain
-      ansible.builtin.command:
-        cmd: oc get ingresses.config.openshift.io cluster -o jsonpath='{.spec.domain}'
-      environment:
-        KUBECONFIG: "{{ _kubeconfig }}"
-      register: _apps_domain
-      changed_when: false
+- name: Get cluster apps domain for routes
+  ansible.builtin.command:
+    cmd: oc get ingresses.config.openshift.io cluster -o jsonpath='{.spec.domain}'
+  environment:
+    KUBECONFIG: "{{ _kubeconfig }}"
+  register: _apps_domain
+  changed_when: false
+  when: >-
+    (seaweedfs_expose_s3_route | default(false) | bool) or
+    (seaweedfs_expose_filer_route | default(false) | bool) or
+    (seaweedfs_expose_master_route | default(false) | bool)
 
+- name: Create S3 API Route
+  when: seaweedfs_expose_s3_route | default(false) | bool
+  block:
     - name: Set S3 Route hostname
       ansible.builtin.set_fact:
         _s3_hostname: "{{ seaweedfs_route_hostname | default('', true) | ternary(seaweedfs_route_hostname, 's3.' + _apps_domain.stdout) }}"
@@ -253,20 +257,66 @@
               insecureEdgeTerminationPolicy: Redirect
       environment:
         KUBECONFIG: "{{ _kubeconfig }}"
-      register: _route_result
-      changed_when: "'created' in _route_result.stdout"
+      register: _s3_route_result
+      changed_when: "'created' in _s3_route_result.stdout or 'configured' in _s3_route_result.stdout"
 
-    - name: Get S3 Route URL
-      ansible.builtin.command:
-        cmd: oc get route seaweedfs-s3 -n {{ seaweedfs_namespace }} -o jsonpath='{.spec.host}'
-      environment:
-        KUBECONFIG: "{{ _kubeconfig }}"
-      register: _route_host
-      changed_when: false
+- name: Create Filer UI Route
+  when: seaweedfs_expose_filer_route | default(false) | bool
+  ansible.builtin.command:
+    cmd: oc apply -f -
+    stdin: |
+      apiVersion: route.openshift.io/v1
+      kind: Route
+      metadata:
+        name: seaweedfs-filer
+        namespace: {{ seaweedfs_namespace }}
+      spec:
+        host: filer.{{ _apps_domain.stdout }}
+        to:
+          kind: Service
+          name: seaweedfs-filer
+          weight: 100
+        port:
+          targetPort: 8888
+        tls:
+          termination: edge
+          insecureEdgeTerminationPolicy: Redirect
+  environment:
+    KUBECONFIG: "{{ _kubeconfig }}"
+  register: _filer_route_result
+  changed_when: "'created' in _filer_route_result.stdout or 'configured' in _filer_route_result.stdout"
 
-- name: Display SeaweedFS S3 endpoints
+- name: Create Master UI Route
+  when: seaweedfs_expose_master_route | default(false) | bool
+  ansible.builtin.command:
+    cmd: oc apply -f -
+    stdin: |
+      apiVersion: route.openshift.io/v1
+      kind: Route
+      metadata:
+        name: seaweedfs-master
+        namespace: {{ seaweedfs_namespace }}
+      spec:
+        host: seaweedfs.{{ _apps_domain.stdout }}
+        to:
+          kind: Service
+          name: seaweedfs-master
+          weight: 100
+        port:
+          targetPort: 9333
+        tls:
+          termination: edge
+          insecureEdgeTerminationPolicy: Redirect
+  environment:
+    KUBECONFIG: "{{ _kubeconfig }}"
+  register: _master_route_result
+  changed_when: "'created' in _master_route_result.stdout or 'configured' in _master_route_result.stdout"
+
+- name: Display SeaweedFS endpoints
   ansible.builtin.debug:
     msg: >-
-      SeaweedFS S3 internal: seaweedfs-s3.{{ seaweedfs_namespace }}.svc:8333 |
-      External: https://{{ _route_host.stdout | default(_s3_hostname | default('not exposed')) }}/ |
-      Credentials secret: {{ seaweedfs_namespace }}/seaweedfs-s3-credentials
+      S3 internal: seaweedfs-s3.{{ seaweedfs_namespace }}.svc:8333 |
+      S3 Route: {{ (seaweedfs_expose_s3_route | default(false) | bool) | ternary('https://' + _s3_hostname | default('') + '/', 'disabled') }} |
+      Filer UI: {{ (seaweedfs_expose_filer_route | default(false) | bool) | ternary('https://filer.' + _apps_domain.stdout | default('') + '/', 'disabled') }} |
+      Master UI: {{ (seaweedfs_expose_master_route | default(false) | bool) | ternary('https://seaweedfs.' + _apps_domain.stdout | default('') + '/', 'disabled') }} |
+      Credentials: {{ seaweedfs_namespace }}/seaweedfs-s3-credentials

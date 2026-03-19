@@ -30,11 +30,13 @@ seaweedfs_helm_repo: https://seaweedfs.github.io/seaweedfs/helm
 seaweedfs_helm_chart: seaweedfs/seaweedfs
 seaweedfs_namespace: seaweedfs
 seaweedfs_volume_size: "50Gi"
-seaweedfs_expose_route: true
-seaweedfs_route_hostname: ""        # auto-derived as s3.<apps_domain> if empty
 seaweedfs_s3_access_key: ""         # auto-generated if empty
 seaweedfs_s3_secret_key: ""         # auto-generated if empty
 seaweedfs_s3_anonymous_read: true   # allow anonymous Read + List
+seaweedfs_expose_s3_route: false    # Route for S3 API (s3.<apps_domain>)
+seaweedfs_expose_filer_route: false # Route for Filer UI (filer.<apps_domain>)
+seaweedfs_expose_master_route: false # Route for Master UI (seaweedfs.<apps_domain>)
+seaweedfs_route_hostname: ""        # custom S3 hostname; auto-derived if empty
 
 # Shared
 storage_operator_wait_timeout: 300
