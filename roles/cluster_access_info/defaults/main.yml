@@ -1,0 +1,4 @@
+---
+cluster_access_info_enabled: true
+cluster_access_info_path: "{{ playbook_dir }}/../cluster-access.txt"
+ignition_output_dir: "{{ playbook_dir }}/../ignition-output"

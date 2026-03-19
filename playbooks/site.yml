@@ -13,6 +13,7 @@
 #   --tags monitor         Phase 7: bootstrap monitoring + validation
 #   --tags certs           Phase 8: TLS certificates (cert-manager + Let's Encrypt)
 #   --tags storage         Phase 9: persistent storage (OpenEBS / Rook-Ceph / SeaweedFS)
+#   --tags access-info     Phase 10: write cluster access info to file
 #
 # Phases executed (when no tags specified, all run in order):
 #   0. Disconnected preparation -- mirror registry + release mirror (if disconnected)
@@ -26,6 +27,7 @@
 #   8. Bootstrap monitoring and cluster validation (on jumpbox)
 #   9. TLS certificate automation via cert-manager + Let's Encrypt (on jumpbox)
 #  10. Persistent storage provisioning (on jumpbox)
+#  11. Cluster access info summary (on jumpbox)
 
 - name: "Phase 0: Disconnected preparation (mirror registry + release mirror)"
   hosts: localhost
@@ -130,3 +132,13 @@
   roles:
     - role: storage_configure
       when: storage_enabled | default(true) | bool
+
+- name: "Phase 10: Cluster access info summary"
+  hosts: localhost
+  connection: local
+  gather_facts: true
+  become: false
+  tags: [access-info]
+  roles:
+    - role: cluster_access_info
+      when: cluster_access_info_enabled | default(true) | bool

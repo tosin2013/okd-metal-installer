@@ -1,0 +1,85 @@
+---
+- name: Set KUBECONFIG path
+  ansible.builtin.set_fact:
+    _kubeconfig: "{{ ignition_output_dir }}/auth/kubeconfig"
+
+- name: Verify cluster is accessible
+  ansible.builtin.command:
+    cmd: oc get clusterversion -o jsonpath='{.items[0].status.desired.version}'
+  environment:
+    KUBECONFIG: "{{ _kubeconfig }}"
+  register: _cluster_version
+  changed_when: false
+
+- name: Get console URL
+  ansible.builtin.command:
+    cmd: oc get route console -n openshift-console -o jsonpath='{.spec.host}'
+  environment:
+    KUBECONFIG: "{{ _kubeconfig }}"
+  register: _console_host
+  changed_when: false
+
+- name: Get OAuth URL
+  ansible.builtin.command:
+    cmd: oc get route oauth-openshift -n openshift-authentication -o jsonpath='{.spec.host}'
+  environment:
+    KUBECONFIG: "{{ _kubeconfig }}"
+  register: _oauth_host
+  changed_when: false
+
+- name: Get API server URL
+  ansible.builtin.command:
+    cmd: oc whoami --show-server
+  environment:
+    KUBECONFIG: "{{ _kubeconfig }}"
+  register: _api_url
+  changed_when: false
+
+- name: Read kubeadmin password
+  ansible.builtin.slurp:
+    src: "{{ ignition_output_dir }}/auth/kubeadmin-password"
+  register: _kubeadmin_pw
+
+- name: Resolve absolute kubeconfig path
+  ansible.builtin.stat:
+    path: "{{ _kubeconfig }}"
+  register: _kubeconfig_stat
+
+- name: Write cluster-access.txt
+  ansible.builtin.copy:
+    content: |
+      ============================================
+       OKD Cluster Access Information
+       Generated: {{ ansible_date_time.iso8601 }}
+      ============================================
+
+      Cluster Version : {{ _cluster_version.stdout }}
+      API URL         : {{ _api_url.stdout }}
+      Console URL     : https://{{ _console_host.stdout }}
+      OAuth URL       : https://{{ _oauth_host.stdout }}
+
+      kubeadmin password : {{ _kubeadmin_pw.content | b64decode | trim }}
+      kubeconfig path    : {{ _kubeconfig_stat.stat.path }}
+
+      ---
+      Quick start:
+        export KUBECONFIG={{ _kubeconfig_stat.stat.path }}
+        oc login -u kubeadmin -p '{{ _kubeadmin_pw.content | b64decode | trim }}'
+      ============================================
+    dest: "{{ cluster_access_info_path }}"
+    mode: "0600"
+
+- name: Display cluster access summary
+  ansible.builtin.debug:
+    msg:
+      - "============================================"
+      - " OKD Cluster Access Information"
+      - "============================================"
+      - "Cluster Version : {{ _cluster_version.stdout }}"
+      - "API URL         : {{ _api_url.stdout }}"
+      - "Console URL     : https://{{ _console_host.stdout }}"
+      - "OAuth URL       : https://{{ _oauth_host.stdout }}"
+      - "kubeadmin pass  : {{ _kubeadmin_pw.content | b64decode | trim }}"
+      - "kubeconfig      : {{ _kubeconfig_stat.stat.path }}"
+      - "============================================"
+      - "Saved to: {{ cluster_access_info_path }}"

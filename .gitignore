@@ -21,6 +21,7 @@ pull-secret.txt
 kubeconfig
 auth/
 certs/
+cluster-access.txt
 
 # Generated artifacts
 *.iso
