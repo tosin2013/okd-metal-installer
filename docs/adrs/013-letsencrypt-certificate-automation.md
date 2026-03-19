@@ -6,7 +6,7 @@
 
 ## Context
 
-OKD deploys with self-signed certificates by default. The cluster-internal CA issues certificates for the API server (`api.okd-sno.ocpincubator.com:6443`), the web console (`console-openshift-console.apps.okd-sno.ocpincubator.com`), OAuth endpoints, and the default ingress controller. While these certificates are valid within the cluster's trust chain, they are not trusted by external clients:
+OKD deploys with self-signed certificates by default. The cluster-internal CA issues certificates for the API server (`api.<cluster>.<domain>:6443`), the web console (`console-openshift-console.apps.<cluster>.<domain>`), OAuth endpoints, and the default ingress controller. While these certificates are valid within the cluster's trust chain, they are not trusted by external clients:
 
 - Browsers display security warnings on the web console and OAuth login
 - CLI tools (`oc login`) require `--insecure-skip-tls-verify` or manual CA trust
@@ -23,9 +23,9 @@ Use **cert-manager** with **Let's Encrypt** via the **DNS-01 challenge** (solved
 
 Two certificate targets, in priority order:
 
-1. **Ingress wildcard** (`*.apps.okd-sno.ocpincubator.com`): Covers the web console, OAuth, all application Routes. This is the highest-impact change -- a single certificate secures all ingress traffic.
+1. **Ingress wildcard** (`*.apps.<cluster>.<domain>`): Covers the web console, OAuth, all application Routes. This is the highest-impact change -- a single certificate secures all ingress traffic.
 
-2. **API server** (`api.okd-sno.ocpincubator.com`): Optional and more involved. Requires patching the kube-apiserver operator's serving cert configuration. Recommended only if external API consumers require trusted TLS.
+2. **API server** (`api.<cluster>.<domain>`): Optional and more involved. Requires patching the kube-apiserver operator's serving cert configuration. Recommended only if external API consumers require trusted TLS.
 
 ### Approach A (Recommended): cert-manager operator via OperatorHub
 
@@ -41,7 +41,7 @@ Two certificate targets, in priority order:
 ### Approach B (Alternative): Manual certbot on jumpbox
 
 1. Install `certbot` and `certbot-dns-route53` plugin on the jumpbox
-2. Run `certbot certonly --dns-route53 -d '*.apps.okd-sno.ocpincubator.com'`
+2. Run `certbot certonly --dns-route53 -d '*.apps.<cluster>.<domain>'`
 3. Create a TLS Secret from the issued certificate files
 4. Patch the `IngressController` to use the Secret
 5. Set up a cron job or systemd timer for renewal
@@ -79,6 +79,12 @@ The cluster needs Route 53 write access for DNS-01 challenges. The existing AWS 
 - The IAM user (`digital-ocean`, per the current deployment) already has Route 53 permissions
 - For better security, consider creating a dedicated IAM user with only `route53:GetChange`, `route53:ChangeResourceRecordSets`, and `route53:ListHostedZonesByName` permissions
 
+### Certificate Reuse Across Redeployments
+
+When the same domain (`<cluster>.<domain>`) is reused across cluster teardown/redeploy cycles, the TLS certificate Secrets should be backed up from the old cluster and restored to the new one. This avoids hitting Let's Encrypt rate limits (5 duplicate certificates per domain per week) and provides immediate trusted TLS on the new cluster without waiting for DNS-01 validation.
+
+Backed-up certificate Secrets are stored in the `certs/` directory (gitignored) and can be re-applied with `oc apply -f` after the new cluster is operational. cert-manager will resume automatic renewal once the corresponding Certificate CRDs are re-created.
+
 ### Ansible Integration
 
 Two options for operationalizing this:
@@ -97,7 +103,7 @@ metadata:
 spec:
   acme:
     server: https://acme-v02.api.letsencrypt.org/directory
-    email: admin@ocpincubator.com
+    email: admin@<domain>
     privateKeySecretRef:
       name: letsencrypt-production-key
     solvers:
@@ -123,7 +129,7 @@ spec:
     name: letsencrypt-production
     kind: ClusterIssuer
   dnsNames:
-  - "*.apps.okd-sno.ocpincubator.com"
+  - "*.apps.<cluster>.<domain>"
 ```
 
 ### IngressController Patch

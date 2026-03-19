@@ -6,6 +6,8 @@
 
 **ADR**: [013-letsencrypt-certificate-automation](../adrs/013-letsencrypt-certificate-automation.md)
 
+**Note**: Throughout this runbook, replace `<cluster>` and `<domain>` with your actual values (e.g., from `cluster_name` and `base_domain` in your inventory `group_vars/all.yml`).
+
 ---
 
 ## Prerequisites
@@ -100,7 +102,7 @@ metadata:
 spec:
   acme:
     server: https://acme-staging-v02.api.letsencrypt.org/directory
-    email: admin@ocpincubator.com
+    email: admin@<domain>
     privateKeySecretRef:
       name: letsencrypt-staging-key
     solvers:
@@ -140,7 +142,7 @@ spec:
     name: letsencrypt-staging
     kind: ClusterIssuer
   dnsNames:
-  - "*.apps.okd-sno.ocpincubator.com"
+  - "*.apps.<cluster>.<domain>"
 EOF
 ```
 
@@ -172,7 +174,7 @@ metadata:
 spec:
   acme:
     server: https://acme-v02.api.letsencrypt.org/directory
-    email: admin@ocpincubator.com
+    email: admin@<domain>
     privateKeySecretRef:
       name: letsencrypt-production-key
     solvers:
@@ -204,7 +206,7 @@ spec:
     name: letsencrypt-production
     kind: ClusterIssuer
   dnsNames:
-  - "*.apps.okd-sno.ocpincubator.com"
+  - "*.apps.<cluster>.<domain>"
 EOF
 ```
 
@@ -236,13 +238,13 @@ oc rollout status deployment/router-default -n openshift-ingress --timeout=120s
 Test the console with curl (should no longer show self-signed certificate errors):
 
 ```bash
-curl -sI https://console-openshift-console.apps.okd-sno.ocpincubator.com | head -5
+curl -sI https://console-openshift-console.apps.<cluster>.<domain> | head -5
 ```
 
 Check the certificate details:
 
 ```bash
-echo | openssl s_client -connect console-openshift-console.apps.okd-sno.ocpincubator.com:443 -servername console-openshift-console.apps.okd-sno.ocpincubator.com 2>/dev/null | openssl x509 -noout -issuer -dates -subject
+echo | openssl s_client -connect console-openshift-console.apps.<cluster>.<domain>:443 -servername console-openshift-console.apps.<cluster>.<domain> 2>/dev/null | openssl x509 -noout -issuer -dates -subject
 ```
 
 Expected issuer: `O = Let's Encrypt` (or `(STAGING) Let's Encrypt` if still on staging).
@@ -250,7 +252,7 @@ Expected issuer: `O = Let's Encrypt` (or `(STAGING) Let's Encrypt` if still on s
 Access the web console in a browser -- no security warnings should appear:
 
 ```
-https://console-openshift-console.apps.okd-sno.ocpincubator.com
+https://console-openshift-console.apps.<cluster>.<domain>
 ```
 
 ## Step 8: Clean Up Staging Resources (Optional)
@@ -317,7 +319,7 @@ spec:
     name: letsencrypt-production
     kind: ClusterIssuer
   dnsNames:
-  - "api.okd-sno.ocpincubator.com"
+  - "api.<cluster>.<domain>"
 EOF
 ```
 
@@ -326,7 +328,57 @@ Then patch the API server:
 ```bash
 oc patch apiserver cluster \
   --type=merge \
-  -p '{"spec":{"servingCerts":{"namedCertificates":[{"names":["api.okd-sno.ocpincubator.com"],"servingCertificate":{"name":"api-tls"}}]}}}'
+  -p '{"spec":{"servingCerts":{"namedCertificates":[{"names":["api.<cluster>.<domain>"],"servingCertificate":{"name":"api-tls"}}]}}}'
 ```
 
 **Warning**: This triggers a kube-apiserver rollout. The API will be temporarily unavailable (1-2 minutes on SNO). Plan accordingly.
+
+## Saving and Reusing Certificates Across Redeployments
+
+If you tear down and redeploy the cluster using the same domain (e.g., same `cluster_name` and `base_domain`), you can avoid re-issuing certificates by backing up and restoring the TLS secrets. This avoids hitting Let's Encrypt rate limits (5 duplicate certificates per week).
+
+### Backup (before teardown)
+
+```bash
+oc get secret apps-wildcard-tls -n openshift-ingress -o yaml > /root/okd-metal-installer/certs/apps-wildcard-tls.yaml
+
+# Optional: API server cert
+oc get secret api-tls -n openshift-config -o yaml > /root/okd-metal-installer/certs/api-tls.yaml
+```
+
+Strip cluster-specific metadata to make the secrets portable:
+
+```bash
+for f in /root/okd-metal-installer/certs/*.yaml; do
+  python3 -c "
+import yaml, sys
+with open('$f') as fh: d = yaml.safe_load(fh)
+d['metadata'] = {k: d['metadata'][k] for k in ('name', 'namespace') if k in d['metadata']}
+with open('$f', 'w') as fh: yaml.dump(d, fh, default_flow_style=False)
+"
+done
+```
+
+### Restore (after redeployment)
+
+After the new cluster is up and cert-manager is installed:
+
+```bash
+oc apply -f /root/okd-metal-installer/certs/apps-wildcard-tls.yaml
+oc apply -f /root/okd-metal-installer/certs/api-tls.yaml  # if backed up
+
+# Patch IngressController to use the restored cert
+oc patch ingresscontroller default \
+  -n openshift-ingress-operator \
+  --type=merge \
+  -p '{"spec":{"defaultCertificate":{"name":"apps-wildcard-tls"}}}'
+```
+
+The restored certificate will work immediately. cert-manager will take over renewal management once the corresponding Certificate resource is re-created (Steps 5-6 above).
+
+### Important notes
+
+- The `certs/` directory is in `.gitignore` -- never commit TLS private keys to git
+- Let's Encrypt certificates are valid for 90 days; check expiry before restoring stale backups
+- If the domain changes, you must issue new certificates -- the backed-up certs are domain-bound
+- Rate limit: Let's Encrypt allows 5 duplicate certificates per domain per week; backups avoid this limit during rapid iteration

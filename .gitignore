@@ -19,6 +19,7 @@ pull-secret.json
 pull-secret.txt
 kubeconfig
 auth/
+certs/
 
 # Generated artifacts
 *.iso
