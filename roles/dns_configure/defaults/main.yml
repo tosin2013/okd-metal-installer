@@ -2,6 +2,7 @@
 route53_zone_id: ""
 dns_ttl: 300
 dns_state: present
+cluster_topology: sno
 
 # Set to true to create PTR (reverse DNS) records
 dns_create_ptr: false

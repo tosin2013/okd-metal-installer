@@ -269,7 +269,7 @@
   ansible.builtin.command:
     cmd: >-
       ssh {{ hetzner_ssh_opts }} core@{{ ansible_host }}
-      cat /etc/.ignition-result.json
+      sudo cat /etc/.ignition-result.json
   delegate_to: localhost
   register: _ignition_check
   changed_when: false

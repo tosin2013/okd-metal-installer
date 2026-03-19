@@ -12,6 +12,8 @@ ssh_key_path: "~/.ssh/id_ed25519.pub"
 
 scos_iso_url: "https://rhcos.mirror.openshift.com/art/storage/prod/streams/c10s/builds/10.0.20260310-0/x86_64/scos-10.0.20260310-0-live-iso.x86_64.iso"
 
+cluster_topology: sno
+
 dest_device: /dev/nvme0n1
 live_iso_device: /dev/nvme0n1
 installation_disk: /dev/nvme1n1
