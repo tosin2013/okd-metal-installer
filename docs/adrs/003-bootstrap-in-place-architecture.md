@@ -108,6 +108,34 @@ Recovery options in order of preference:
 
 **Recommendation**: Always have KVM access available during first BIP deployments on new hardware. Verify the server's boot order (BIOS vs UEFI, PXE priority) before the first deployment.
 
+## Deployment Validation (88.99.140.83, 2026-03-19)
+
+The dual-disk BIP strategy was validated with a successful end-to-end SNO deployment on Hetzner dedicated server 88.99.140.83:
+
+| Metric | Value |
+|--------|-------|
+| Server | Hetzner AX41-NVMe, 2x 512GB NVMe, BIOS/Legacy mode |
+| OKD version | 4.22.0-okd-scos.ec.9 |
+| CoreOS version | CentOS Stream CoreOS 10.0.20260310-0 |
+| Live ISO device | `/dev/nvme0n1` |
+| Installation disk | `/dev/nvme1n1` |
+| Bootstrap complete | 18 min 57 sec (`openshift-install wait-for bootstrap-complete`) |
+| API available | Within ~2 minutes of CoreOS boot |
+| Node Ready | Within ~10 minutes of install-to-disk reboot |
+| Cluster operators available | 33/34 within ~25 minutes of bootstrap complete |
+
+### Confirmed behaviors
+
+1. **`--live-ignition` approach works correctly**: BIP Ignition fired in the live ISO environment (RAM), `bootkube.service` rendered and applied all manifests, `install-to-disk.service` wrote the final OS to `nvme1n1` without "busy partitions" errors.
+
+2. **`--copy-network` preserved static IP**: After `install-to-disk.service` rebooted the system from `nvme1n1`, the installed OS retained the static IP configuration (`88.99.140.83`) from the live ISO environment. SSH and API were reachable immediately on the correct IP.
+
+3. **MBR wipe enabled BIOS fallthrough**: After `install-to-disk.service` completed on the live ISO boot, the `wipe-live-iso-mbr.service` zeroed the MBR of `nvme0n1`. On reboot, BIOS skipped the now-unbootable `nvme0n1` and fell through to `nvme1n1` where the installed OS resided.
+
+4. **Disk layout after installation**: The installed OS on the booted disk showed the expected CoreOS partition structure: 1M bios_grub, 127M EFI (vfat), 384M /boot (ext4), 476.4G /sysroot (xfs). The former live ISO disk retained its iso9660 data but had no bootable MBR.
+
+5. **Reboot timing**: The system rebooted approximately 7 minutes after the live ISO booted, consistent with the BIP flow completing `install-to-disk.service` and the `shutdown -r +1` providing the 1-minute window for MBR wipe.
+
 ## Related PRD Sections
 
 - Section 5: "Bootstrap-in-Place Architecture"

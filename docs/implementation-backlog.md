@@ -1,6 +1,6 @@
 # OKD-Metal MVP Implementation Backlog
 
-**Generated from**: 10 ADRs in `docs/adrs/`
+**Generated from**: 13 ADRs in `docs/adrs/`
 **Governed by**: Architectural rules in `rules/architectural-rules.json`
 **Scope**: MVP (v0.1.0) per PRD.md Section 7
 
@@ -129,14 +129,15 @@
 ## Phase 8: Integration and Testing
 **Goal**: End-to-end integration and validation.
 **Governing ADRs**: All
+**Status**: Partially Complete (March 2026)
 
-| Task ID | Task | Description | ADR | Priority |
-|---------|------|-------------|-----|----------|
-| P8-01 | SNO integration test | End-to-end SNO deployment on Hetzner hardware | All | Critical |
-| P8-02 | Compact cluster integration test | 3-node compact cluster deployment | All | High |
-| P8-03 | Ansible lint and validation | ansible-lint, yamllint across all roles and playbooks | 001 | High |
-| P8-04 | Documentation | README.md with quickstart, architecture overview, variable reference | All | High |
-| P8-05 | Example configurations | Complete example inventories and group_vars for each topology | 006 | Medium |
+| Task ID | Task | Description | ADR | Status |
+|---------|------|-------------|-----|--------|
+| P8-01 | SNO integration test | End-to-end SNO deployment on Hetzner hardware -- validated 2026-03-19, bootstrap in 19 min, full install in 32 min | All | Done |
+| P8-02 | Compact cluster integration test | 3-node compact cluster deployment | All | Pending |
+| P8-03 | Ansible lint and validation | ansible-lint, yamllint across all roles and playbooks | 001 | Pending |
+| P8-04 | Documentation | README.md with quickstart, architecture overview, variable reference | All | Pending |
+| P8-05 | Example configurations | Complete example inventories and group_vars for each topology | 006 | Pending |
 
 ---
 
@@ -174,6 +175,21 @@
 
 ---
 
+## Phase 11: Day-2 Post-Deployment Operations
+**Goal**: Automate common post-deployment tasks for production readiness.
+**Governing ADRs**: ADR-013, ADR-004
+**Status**: Planned
+
+| Task ID | Task | Description | ADR | Status |
+|---------|------|-------------|-----|--------|
+| P11-01 | Let's Encrypt wildcard certificate | Install cert-manager, configure DNS-01 ClusterIssuer via Route 53, issue `*.apps` wildcard cert, patch IngressController | 013 | Pending |
+| P11-02 | API server trusted certificate | (Optional) Issue cert for `api.<cluster>.<domain>` and patch kube-apiserver serving cert | 013 | Pending |
+| P11-03 | Post-install validation playbook | Smoke tests: node Ready, all ClusterOperators Available, console reachable, OAuth functional | 012 | Pending |
+| P11-04 | Cluster backup strategy | etcd snapshot automation, backup schedule, restore runbook | -- | Pending |
+| P11-05 | Upgrade automation | Document and optionally automate OKD version upgrades via CVO | -- | Pending |
+
+---
+
 ## Dependency Graph
 
 ```
@@ -189,6 +205,7 @@ Phase 5 (DNS) -- independent, can parallel with Phase 3/4
 Phase 6 (Jumpbox) -- independent, can start anytime
 Phase 7 (Disconnected) -- depends on Phase 1, 3, 4
 Phase 8 (Integration) -- depends on all previous phases
+Phase 11 (Day-2 Ops) -- depends on successful deployment (Phase 8)
 ```
 
 ---
@@ -205,7 +222,8 @@ Phase 8 (Integration) -- depends on all previous phases
 | 5 - DNS | 5 | 0 | 3 | 2 | 0 | Done |
 | 6 - Jumpbox | 4 | 0 | 0 | 3 | 1 | Partial |
 | 7 - Disconnected | 5 | 0 | 0 | 4 | 1 | Done |
-| 8 - Integration | 5 | 1 | 3 | 1 | 0 | In Progress |
+| 8 - Integration | 5 | 1 | 3 | 1 | 0 | Partial (SNO validated) |
 | 9 - Operational Hardening | 6 | -- | -- | -- | -- | Done |
 | 10 - BIP Boot Fix | 8 | -- | -- | -- | -- | Done |
-| **Total** | **60** | **11** | **16** | **15** | **4** | |
+| 11 - Day-2 Operations | 5 | -- | -- | -- | -- | Planned |
+| **Total** | **65** | **11** | **16** | **15** | **4** | |

@@ -99,3 +99,24 @@ Produce a structured summary showing node status, cluster version, operator heal
 7. **Pre-boot validation is equally important**: A stale release image digest caused `release-image.service` to fail on first boot, which was only visible via `journalctl` on the node. The `boot_deliver` role now validates the release image is pullable *before* writing the ISO to disk (see ADR-011). This prevents scenarios where `bootstrap_monitor` waits indefinitely for an API server that will never start.
 
 8. **Tag-based execution enables targeted re-runs**: Adding `tags: [boot]` and `tags: [monitor]` to `site.yml` plays allows running `--tags monitor` independently to retry bootstrap monitoring without re-running the entire boot delivery sequence. This is particularly useful when a deployment stalls and the operator wants to re-check after manual intervention.
+
+### Successful Deployment Validation (88.99.140.83, 2026-03-19)
+
+The monitoring strategy was validated with a successful end-to-end SNO deployment:
+
+| Phase | Command | Duration | Notes |
+|-------|---------|----------|-------|
+| API health | Manual `curl` to `:6443/version` | ~2 min after CoreOS boot | API reported v1.35.1 within 2 minutes of the live ISO booting |
+| Bootstrap complete | `openshift-install wait-for bootstrap-complete` | 18 min 57 sec | API detected up, then waited for etcd member removal |
+| Install complete | `openshift-install wait-for install-complete` | 11 min 33 sec | All 34 cluster operators progressed to Available |
+| **Total (boot to install-complete)** | | **~32 min** | Well within the 45-min bootstrap + 40-min install timeouts |
+
+**Observations:**
+
+9. **Transient reflector error during install-to-disk reboot is benign**: When the BIP live ISO rebooted (after `install-to-disk.service` completed), `openshift-install wait-for bootstrap-complete` logged a reflector watch error (`context canceled`) as the API connection dropped. This self-healed when the API came back up on the installed OS. The error can be safely ignored.
+
+10. **Bootstrap etcd member removal is the final gate**: After the API was up and the system rebooted from the installed OS, `wait-for bootstrap-complete` waited specifically for the bootstrap etcd member to be removed. This took approximately 5 minutes after the installed OS booted, as the etcd operator transitioned from bootstrap to production etcd.
+
+11. **`insights` operator was the last to stabilize**: During `wait-for install-complete`, the cluster version reported "Unable to apply: the cluster operator insights is not available" as the final blocking condition. The `insights` operator completed approximately 10 minutes after bootstrap complete. All other operators (33/34) were available within ~5 minutes.
+
+12. **Console and authentication fully operational**: The install completed with console route `https://console-openshift-console.apps.okd-sno.ocpincubator.com` accessible and kubeadmin login functional.

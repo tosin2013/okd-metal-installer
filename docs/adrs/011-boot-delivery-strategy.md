@@ -111,6 +111,22 @@ When automated boot delivery encounters issues (emergency mode, boot order probl
 
 This fallback eliminates all dual-disk and MBR wipe complexity since the ISO boots from virtual/removable media while `install-to-disk` writes to the local NVMe disk.
 
+### Deployment Validation (88.99.140.83, 2026-03-19)
+
+Hetzner Mode 3 (live ISO dd with dual-disk BIP) was validated with a successful end-to-end SNO deployment:
+
+1. **Rescue mode activation and ISO delivery**: Robot API calls for rescue activation, hardware reset, ISO download via `wget`, and `dd` to `nvme0n1` all completed without errors. The split `dd`/`sync` task pattern (Lesson #3) worked reliably.
+
+2. **Pre-dd validation**: The release image pull test on the jumpbox confirmed `quay.io/okd/scos-release@sha256:a78dd6aed...` was pullable before any disk operations. This gate prevented the stale-image failure mode from previous deployments.
+
+3. **Disk wipe effectiveness**: `wipefs -af` + `sgdisk --zap-all` + `dd if=/dev/zero bs=1M count=100` on both NVMe disks ensured clean boot state. No stale partition tables or boot entries interfered with the new installation.
+
+4. **MBR wipe service confirmed**: After `install-to-disk.service` wrote the final OS to `nvme1n1`, the `wipe-live-iso-mbr.service` successfully zeroed the first 512 bytes of `nvme0n1`. On reboot, BIOS skipped the unbootable `nvme0n1` and booted the installed OS from `nvme1n1`. The `shutdown -r +1` provided sufficient time for the MBR wipe to execute.
+
+5. **Post-boot validation**: CoreOS was correctly identified (`/etc/os-release` contained "CoreOS"). The Ignition result file required `sudo` access (fixed: added `sudo` to the verification command). The release image was pullable from the booted node.
+
+6. **Timing**: ISO download from jumpbox HTTP server to rescue system took ~10 seconds (same Hetzner DC). `dd` of 853 MiB ISO completed in <1 second (RAM-backed rescue filesystem). Total boot delivery phase (rescue activation through CoreOS SSH reachable): ~3 minutes.
+
 ### Compatible BMC Firmware (Redfish)
 
 | Vendor | BMC | Minimum Version | Virtual Media | Notes |
