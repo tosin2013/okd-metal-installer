@@ -5,25 +5,18 @@
     state: directory
     mode: "0700"
 
-- name: Export apps wildcard TLS secret
-  ansible.builtin.command:
+- name: Export and strip apps wildcard TLS secret
+  ansible.builtin.shell:
     cmd: >-
-      oc get secret apps-wildcard-tls -n openshift-ingress -o yaml
-  environment:
-    KUBECONFIG: "{{ _kubeconfig }}"
-  register: _apps_secret
-  changed_when: false
-
-- name: Strip cluster metadata and save apps wildcard cert backup
-  ansible.builtin.script:
-    cmd: >-
+      oc get secret apps-wildcard-tls -n openshift-ingress -o yaml |
       python3 -c "
-      import yaml, sys
-      d = yaml.safe_load(sys.stdin.read())
-      d['metadata'] = {k: d['metadata'][k] for k in ('name', 'namespace') if k in d['metadata']}
+      import yaml, sys;
+      d = yaml.safe_load(sys.stdin.read());
+      d['metadata'] = {k: d['metadata'][k] for k in ('name', 'namespace') if k in d['metadata']};
       print(yaml.dump(d, default_flow_style=False))
       "
-    stdin: "{{ _apps_secret.stdout }}"
+  environment:
+    KUBECONFIG: "{{ _kubeconfig }}"
   register: _apps_clean
   changed_when: false
 
@@ -33,26 +26,18 @@
     dest: "{{ certmanager_certs_backup_dir }}/apps-wildcard-tls.yaml"
     mode: "0600"
 
-- name: Export API TLS secret
-  ansible.builtin.command:
+- name: Export and strip API TLS secret
+  ansible.builtin.shell:
     cmd: >-
-      oc get secret api-tls -n openshift-config -o yaml
-  environment:
-    KUBECONFIG: "{{ _kubeconfig }}"
-  register: _api_secret
-  changed_when: false
-  when: certmanager_issue_api_cert | bool
-
-- name: Strip cluster metadata and save API cert backup
-  ansible.builtin.script:
-    cmd: >-
+      oc get secret api-tls -n openshift-config -o yaml |
       python3 -c "
-      import yaml, sys
-      d = yaml.safe_load(sys.stdin.read())
-      d['metadata'] = {k: d['metadata'][k] for k in ('name', 'namespace') if k in d['metadata']}
+      import yaml, sys;
+      d = yaml.safe_load(sys.stdin.read());
+      d['metadata'] = {k: d['metadata'][k] for k in ('name', 'namespace') if k in d['metadata']};
       print(yaml.dump(d, default_flow_style=False))
       "
-    stdin: "{{ _api_secret.stdout }}"
+  environment:
+    KUBECONFIG: "{{ _kubeconfig }}"
   register: _api_clean
   changed_when: false
   when: certmanager_issue_api_cert | bool

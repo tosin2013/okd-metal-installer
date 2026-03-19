@@ -11,7 +11,7 @@ certmanager_staging_server: "https://acme-staging-v02.api.letsencrypt.org/direct
 certmanager_aws_region: "eu-central-1"
 
 # Operator installation
-certmanager_channel: "stable-v1"
+certmanager_channel: "stable"
 certmanager_source: "community-operators"
 certmanager_operator_wait_timeout: 180
 

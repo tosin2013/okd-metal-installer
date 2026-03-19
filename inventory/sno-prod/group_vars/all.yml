@@ -27,3 +27,8 @@ storage_backend: openebs-lvm
 storage_devices:
   - /dev/nvme1n1
 storage_s3_enabled: true
+
+# Certificates (Phase 8)
+certmanager_enabled: true
+certmanager_acme_email: "tosin.akinosho@gmail.com"
+certmanager_restore_certs: false

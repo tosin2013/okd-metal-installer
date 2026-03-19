@@ -1,5 +1,5 @@
 ---
-- name: Create cert-manager-operator namespace
+- name: Create cert-manager namespace
   ansible.builtin.command:
     cmd: oc apply -f -
     stdin: "{{ lookup('template', 'namespace.yml.j2') }}"
@@ -17,7 +17,7 @@
   register: _og_result
   changed_when: "'created' in _og_result.stdout"
 
-- name: Create Subscription
+- name: Create Subscription for community cert-manager
   ansible.builtin.command:
     cmd: oc apply -f -
     stdin: "{{ lookup('template', 'subscription.yml.j2') }}"
@@ -26,13 +26,15 @@
   register: _sub_result
   changed_when: "'created' in _sub_result.stdout"
 
-- name: Wait for cert-manager namespace to exist
+- name: Wait for cert-manager CSV to succeed
   ansible.builtin.command:
-    cmd: oc get namespace cert-manager
+    cmd: >-
+      oc get csv -n cert-manager
+      -o jsonpath='{.items[?(@.spec.displayName=="cert-manager")].status.phase}'
   environment:
     KUBECONFIG: "{{ _kubeconfig }}"
-  register: _cm_ns
-  until: _cm_ns.rc == 0
+  register: _csv_phase
+  until: _csv_phase.stdout == 'Succeeded'
   retries: 30
   delay: 10
   changed_when: false
@@ -55,6 +57,15 @@
     KUBECONFIG: "{{ _kubeconfig }}"
   changed_when: false
 
+- name: Wait for cert-manager-cainjector deployment to be available
+  ansible.builtin.command:
+    cmd: >-
+      oc wait --for=condition=Available deployment/cert-manager-cainjector
+      -n cert-manager --timeout={{ certmanager_operator_wait_timeout }}s
+  environment:
+    KUBECONFIG: "{{ _kubeconfig }}"
+  changed_when: false
+
 - name: Report cert-manager operator status
   ansible.builtin.debug:
-    msg: "cert-manager operator installed and ready"
+    msg: "Community cert-manager operator installed and ready"
