@@ -20,6 +20,22 @@ hetzner_rescue_wait_timeout: 300
 hetzner_ssh_key_fingerprint: ""
 hetzner_ssh_opts: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -i ~/.ssh/id_ed25519"
 
+# Hetzner install method:
+#   live_iso      - DD the customized ISO to disk, boot the live ISO, BIP runs
+#                   in the live environment (recommended, see ADR-003)
+#   rescue_install - Run coreos-installer install from rescue, BIP runs on the
+#                    installed system (less tested, see ADR-011 Mode 3b)
+hetzner_install_method: live_iso
+
+# Disk where the live ISO is dd'd for Hetzner BIP boot.
+# On single-disk servers, this equals dest_device. On multi-disk BIOS
+# servers, this should be the disk that BIOS boots first (e.g., nvme0n1).
+live_iso_device: "{{ dest_device }}"
+
+# Disk where install-to-disk.service writes the final OS.
+# Must differ from live_iso_device on multi-disk BIOS servers.
+installation_disk: "{{ dest_device }}"
+
 # Post-boot validation
 boot_wait_timeout: 600
 boot_ssh_port: 22

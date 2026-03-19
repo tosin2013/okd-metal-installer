@@ -2,7 +2,17 @@
 # OKD-Metal full deployment orchestration
 # Usage: ansible-playbook -i inventory/mycluster.ini playbooks/site.yml
 #
-# Phases executed:
+# Run individual phases with tags:
+#   --tags disconnected    Phase 0: mirror registry + release mirror
+#   --tags preflight       Phase 1: preflight + ignition generation
+#   --tags networking      Phase 2: network configuration
+#   --tags iso             Phase 3: ISO customization
+#   --tags serve           Phase 4: nginx config server
+#   --tags dns             Phase 5: DNS (Route 53 or internal)
+#   --tags boot            Phase 6: boot delivery
+#   --tags monitor         Phase 7: bootstrap monitoring + validation
+#
+# Phases executed (when no tags specified, all run in order):
 #   0. Disconnected preparation -- mirror registry + release mirror (if disconnected)
 #   1. Preflight validation and topology detection (on jumpbox)
 #   2. Ignition config generation (on jumpbox)
@@ -18,6 +28,7 @@
   connection: local
   gather_facts: true
   become: true
+  tags: [disconnected]
   roles:
     - role: disconnected_prepare
       when: disconnected | bool
@@ -27,6 +38,7 @@
   connection: local
   gather_facts: true
   become: false
+  tags: [preflight]
   roles:
     - preflight
     - ignition_generate
@@ -36,6 +48,7 @@
   connection: local
   gather_facts: false
   become: false
+  tags: [networking]
   roles:
     - network_configure
 
@@ -44,6 +57,7 @@
   connection: local
   gather_facts: true
   become: false
+  tags: [iso]
   roles:
     - iso_customize
 
@@ -52,6 +66,7 @@
   connection: local
   gather_facts: true
   become: true
+  tags: [serve]
   roles:
     - config_serve
 
@@ -60,6 +75,7 @@
   connection: local
   gather_facts: false
   become: false
+  tags: [dns]
   roles:
     - role: dns_configure
       when: not (disconnected | default(false) | bool)
@@ -69,6 +85,7 @@
   connection: local
   gather_facts: false
   become: true
+  tags: [dns]
   roles:
     - role: dns_internal
       when: disconnected | default(false) | bool
@@ -77,6 +94,7 @@
   hosts: masters:workers
   gather_facts: false
   serial: 1
+  tags: [boot]
   roles:
     - boot_deliver
 
@@ -85,5 +103,6 @@
   connection: local
   gather_facts: false
   become: false
+  tags: [monitor]
   roles:
     - bootstrap_monitor

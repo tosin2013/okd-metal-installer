@@ -24,6 +24,11 @@ auth/
 *.iso
 *.ign
 install-config.yaml
+.ignition-work/
+ignition-output/
+iso-output/
+.iso-cache/
+network-output/
 
 # OS
 .DS_Store

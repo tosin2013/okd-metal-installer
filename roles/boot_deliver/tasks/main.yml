@@ -7,6 +7,14 @@
   ansible.builtin.include_tasks: redfish.yml
   when: boot_method == 'redfish'
 
-- name: Boot delivery via Hetzner Robot rescue
+- name: Boot delivery via Hetzner Robot rescue (live ISO dd)
   ansible.builtin.include_tasks: hetzner.yml
-  when: boot_method == 'hetzner'
+  when:
+    - boot_method == 'hetzner'
+    - hetzner_install_method | default('live_iso') == 'live_iso'
+
+- name: Boot delivery via Hetzner Robot rescue (coreos-installer from rescue)
+  ansible.builtin.include_tasks: hetzner_rescue_install.yml
+  when:
+    - boot_method == 'hetzner'
+    - hetzner_install_method | default('live_iso') == 'rescue_install'

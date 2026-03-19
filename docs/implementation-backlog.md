@@ -140,6 +140,40 @@
 
 ---
 
+## Phase 9: Operational Hardening (Post-Deployment Lessons)
+**Goal**: Harden boot delivery and bootstrap against real-world failure modes discovered during Hetzner deployments.
+**Governing ADRs**: ADR-003, ADR-011, ADR-012
+**Status**: Completed (March 2026)
+
+| Task ID | Task | Description | ADR | Status |
+|---------|------|-------------|-----|--------|
+| P9-01 | Pre-dd release image validation | Verify `openshift-install` embedded release image is pullable from jumpbox before wiping disks; abort cleanly if stale | 011 | Done |
+| P9-02 | Post-boot CoreOS validation | After SSH reachable, verify OS is CoreOS, Ignition applied, release image pullable from node | 011, 012 | Done |
+| P9-03 | dd/sync task split | Replace `ansible.builtin.shell` dd with two `ansible.builtin.command` tasks (dd + sync); remove `status=progress` to prevent silent Ansible crash | 011 | Done |
+| P9-04 | site.yml tag-based execution | Add tags (`preflight`, `boot`, `monitor`, etc.) to all plays for selective re-runs | 012 | Done |
+| P9-05 | Boot delivery step reorder | Reorder Hetzner flow: download ISO -> validate -> wipe disks -> dd (was: wipe -> download -> dd) | 011 | Done |
+| P9-06 | Upgrade openshift-install to 4.22.0-okd-scos.ec.9 | Replace stale 4.21.0-okd-scos.8 binary whose release image was garbage-collected from quay.io | 003 | Done |
+
+---
+
+## Phase 10: BIP Boot Architecture Fix (Dual-Disk BIOS)
+**Goal**: Fix the BIP ISO customization to use the correct `--live-ignition` approach, implement dual-disk strategy with MBR wipe for BIOS-mode Hetzner servers, and add alternative boot paths.
+**Governing ADRs**: ADR-003, ADR-011
+**GitHub Issue**: [#3](https://github.com/tosin2013/okd-metal-installer/issues/3)
+
+| Task ID | Task | Description | ADR | Status |
+|---------|------|-------------|-----|--------|
+| P10-01 | Switch ISO customization to `--live-ignition` | Replace `--dest-ignition` + `--dest-device` with `--live-ignition` for SNO/BIP; keep `--dest-ignition` for non-BIP topologies | 003 | Done |
+| P10-02 | Add `installation_disk` variable | Separate `installationDisk` (where install-to-disk writes) from `dest_device` / `live_iso_device` for multi-disk BIOS servers | 003, 011 | Done |
+| P10-03 | Patch install-to-disk.sh for `--copy-network` | Post-process BIP ignition to add `--copy-network` to `coreos-installer install` so static IP config persists | 003 | Done |
+| P10-04 | Generate MBR wipe ignition fragment | Create supplementary live ignition with systemd service to wipe live ISO disk MBR after install-to-disk completes | 011 | Done |
+| P10-05 | Implement `rescue_install` alternative | Add `hetzner_install_method: rescue_install` path that runs `coreos-installer install` from rescue mode (bypasses live ISO) | 011 | Done |
+| P10-06 | Document VNC/KVM fallback runbook | Operational runbook for manual ISO mounting via Hetzner KVM Console virtual media | 011 | Done |
+| P10-07 | Update ADR-003 with research findings | Document `--live-ignition` vs `--dest-ignition`, dual-disk BIP, network config persistence | 003 | Done |
+| P10-08 | Update ADR-011 with corrected flow | Document updated Hetzner Mode 3, Mode 3b, disk variables, MBR wipe, VNC fallback | 011 | Done |
+
+---
+
 ## Dependency Graph
 
 ```
@@ -161,15 +195,17 @@ Phase 8 (Integration) -- depends on all previous phases
 
 ## Summary
 
-| Phase | Tasks | Critical | High | Medium | Low |
-|-------|-------|----------|------|--------|-----|
-| 0 - Scaffold | 6 | 4 | 2 | 0 | 0 |
-| 1 - Ignition | 6 | 4 | 1 | 1 | 0 |
-| 2 - Networking | 5 | 0 | 3 | 1 | 1 |
-| 3 - ISO | 6 | 2 | 2 | 2 | 0 |
-| 4 - Config Serve | 4 | 0 | 2 | 1 | 1 |
-| 5 - DNS | 5 | 0 | 3 | 2 | 0 |
-| 6 - Jumpbox | 4 | 0 | 0 | 3 | 1 |
-| 7 - Disconnected | 5 | 0 | 0 | 4 | 1 |
-| 8 - Integration | 5 | 1 | 3 | 1 | 0 |
-| **Total** | **46** | **11** | **16** | **15** | **4** |
+| Phase | Tasks | Critical | High | Medium | Low | Status |
+|-------|-------|----------|------|--------|-----|--------|
+| 0 - Scaffold | 6 | 4 | 2 | 0 | 0 | Done |
+| 1 - Ignition | 6 | 4 | 1 | 1 | 0 | Done |
+| 2 - Networking | 5 | 0 | 3 | 1 | 1 | Done |
+| 3 - ISO | 6 | 2 | 2 | 2 | 0 | Done |
+| 4 - Config Serve | 4 | 0 | 2 | 1 | 1 | Done |
+| 5 - DNS | 5 | 0 | 3 | 2 | 0 | Done |
+| 6 - Jumpbox | 4 | 0 | 0 | 3 | 1 | Partial |
+| 7 - Disconnected | 5 | 0 | 0 | 4 | 1 | Done |
+| 8 - Integration | 5 | 1 | 3 | 1 | 0 | In Progress |
+| 9 - Operational Hardening | 6 | -- | -- | -- | -- | Done |
+| 10 - BIP Boot Fix | 8 | -- | -- | -- | -- | Done |
+| **Total** | **60** | **11** | **16** | **15** | **4** | |

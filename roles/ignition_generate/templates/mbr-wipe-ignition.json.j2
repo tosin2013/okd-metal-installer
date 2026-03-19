@@ -1,0 +1,14 @@
+{
+  "ignition": {
+    "version": "3.2.0"
+  },
+  "systemd": {
+    "units": [
+      {
+        "name": "wipe-live-iso-mbr.service",
+        "enabled": true,
+        "contents": "[Unit]\nDescription=Wipe MBR of live ISO disk so BIOS falls through to installation disk\nAfter=install-to-disk.service\nConditionPathExists=/opt/openshift/.install-to-disk.done\n\n[Service]\nType=oneshot\nExecStart=/usr/bin/dd if=/dev/zero of={{ live_iso_device }} bs=512 count=1\nExecStartPost=/usr/bin/echo MBR wiped on {{ live_iso_device }} -- BIOS will fall through to {{ installation_disk }}\n\n[Install]\nWantedBy=multi-user.target\n"
+      }
+    ]
+  }
+}

@@ -3,6 +3,11 @@ openshift_install_binary: openshift-install
 ignition_output_dir: "{{ playbook_dir }}/../ignition-output"
 ignition_work_dir: "{{ playbook_dir }}/../.ignition-work"
 
+# Disk where install-to-disk.service writes the final OS (BIP only).
+# On single-disk servers this equals dest_device. On multi-disk BIOS servers
+# where the live ISO is dd'd to one disk, this must point to the OTHER disk.
+installation_disk: "{{ dest_device | default('/dev/sda') }}"
+
 pull_secret_path: "{{ playbook_dir }}/../pull-secret.json"
 ssh_key_path: "~/.ssh/id_rsa.pub"
 

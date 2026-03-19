@@ -113,6 +113,12 @@
   failed_when: false
   when: not ansible_check_mode
 
+- name: Post-process BIP ignition -- add --copy-network to install-to-disk.sh
+  ansible.builtin.include_tasks: bip_postprocess.yml
+  when:
+    - cluster_topology == 'sno'
+    - not ansible_check_mode
+
 - name: Report generated ignition files
   ansible.builtin.debug:
     msg:

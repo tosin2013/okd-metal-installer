@@ -1,4 +1,14 @@
 ---
+# Hetzner boot delivery: coreos-installer install from rescue mode
+#
+# This bypasses the live ISO phase entirely. Instead of dd'ing an ISO and
+# booting it, we run coreos-installer install from the Hetzner rescue system
+# to write CoreOS + BIP ignition directly to disk.
+#
+# CAUTION: The BIP ignition (bootstrap-in-place-for-live-iso.ign) was designed
+# for the live ISO environment. Running it on an installed system is less tested
+# and may encounter edge cases. See ADR-011 Mode 3b for details.
+
 - name: Validate Hetzner Robot credentials are provided
   ansible.builtin.fail:
     msg: "hetzner_robot_user and hetzner_robot_password must be set for boot_method=hetzner"
@@ -18,7 +28,7 @@
 
 - name: Report target server
   ansible.builtin.debug:
-    msg: "Hetzner server {{ ansible_host }} (DC: {{ _hetzner_server.json.server.dc }}, status: {{ _hetzner_server.json.server.status }})"
+    msg: "Hetzner server {{ ansible_host }} (DC: {{ _hetzner_server.json.server.dc }}, status: {{ _hetzner_server.json.server.status }}) -- rescue_install mode"
 
 - name: Activate rescue mode via Hetzner Robot API
   ansible.builtin.uri:
@@ -36,10 +46,6 @@
   register: _rescue_activate
   delegate_to: localhost
 
-- name: Report rescue activation
-  ansible.builtin.debug:
-    msg: "Rescue activated for {{ ansible_host }} with SSH key {{ hetzner_ssh_key_fingerprint }}"
-
 - name: Hardware reset server to boot into rescue
   ansible.builtin.uri:
     url: "{{ hetzner_robot_api }}/reset/{{ ansible_host }}"
@@ -51,7 +57,6 @@
     body:
       type: hw
     status_code: 200
-  register: _hw_reset
   delegate_to: localhost
 
 - name: Wait for server to go down (confirm reboot started)
@@ -89,31 +94,7 @@
   ansible.builtin.debug:
     msg: "Rescue system ready: {{ _rescue_hostname.stdout | trim }}"
 
-- name: Discover all disk devices in rescue
-  ansible.builtin.command:
-    cmd: >-
-      ssh {{ hetzner_ssh_opts }} root@{{ ansible_host }}
-      lsblk -dnp -o NAME,SIZE,TYPE
-  register: _rescue_disks
-  delegate_to: localhost
-  changed_when: false
-
-- name: Report discovered disks
-  ansible.builtin.debug:
-    msg: "{{ _rescue_disks.stdout_lines }}"
-
-# ── Download ISO first (before wipe, so we can validate) ──────────────
-
-- name: Download customized ISO to rescue system
-  ansible.builtin.command:
-    cmd: >-
-      ssh {{ hetzner_ssh_opts }} root@{{ ansible_host }}
-      wget -q --show-progress -O /tmp/node.iso
-      http://{{ jumpbox_ip }}:{{ config_serve_port }}/iso/{{ inventory_hostname }}.iso
-  delegate_to: localhost
-  changed_when: true
-
-# ── Pre-dd validation (fail early, before touching disks) ─────────────
+# ── Pre-install validation ────────────────────────────────────────────
 
 - name: Get openshift-install release image reference
   ansible.builtin.command:
@@ -129,10 +110,6 @@
          | select('match', '.*release image.*')
          | first
          | regex_replace('^.*release image\s+', '') }}
-
-- name: Report release image to validate
-  ansible.builtin.debug:
-    msg: "Release image: {{ _release_image }}"
 
 - name: Verify release image manifest exists in registry
   ansible.builtin.command:
@@ -150,51 +127,53 @@
   ansible.builtin.fail:
     msg: >-
       ABORT: Release image {{ _release_image }} cannot be pulled.
-      Error: {{ _pre_pull_check.stderr | default('unknown') | trim }}.
-      Disks have NOT been wiped -- server is still in rescue and recoverable.
-      Fix: upgrade openshift-install to a version with a valid release image.
+      Disks have NOT been touched -- server is still in rescue and recoverable.
   when: _pre_pull_check.rc is not defined or _pre_pull_check.rc != 0
 
-- name: Pre-dd validation passed
-  ansible.builtin.debug:
-    msg:
-      - "--- Pre-DD Validation PASSED ---"
-      - "  Release image: {{ _release_image }} is pullable"
-      - "  Safe to proceed with disk wipe and dd."
-      - "--------------------------------"
+# ── Install coreos-installer and run from rescue ──────────────────────
 
-# ── Wipe disks and write ISO ──────────────────────────────────────────
+- name: Download coreos-installer binary to rescue system
+  ansible.builtin.command:
+    cmd: >-
+      ssh {{ hetzner_ssh_opts }} root@{{ ansible_host }}
+      bash -c 'curl -sL -o /usr/local/bin/coreos-installer
+      https://mirror.openshift.com/pub/openshift-v4/clients/coreos-installer/latest/coreos-installer_amd64
+      && chmod +x /usr/local/bin/coreos-installer'
+  delegate_to: localhost
+  changed_when: true
 
-- name: Wipe all disks to ensure clean boot state
+- name: Download BIP ignition to rescue system
+  ansible.builtin.command:
+    cmd: >-
+      ssh {{ hetzner_ssh_opts }} root@{{ ansible_host }}
+      wget -q -O /tmp/bip.ign
+      http://{{ jumpbox_ip }}:{{ config_serve_port }}/ignition/bootstrap-in-place-for-live-iso.ign
+  delegate_to: localhost
+  changed_when: true
+
+- name: Wipe all disks to ensure clean state
   ansible.builtin.shell: |
     ssh {{ hetzner_ssh_opts }} root@{{ ansible_host }} \
       'for d in $(lsblk -dnp -o NAME | grep -v loop); do wipefs -af $d; sgdisk --zap-all $d 2>/dev/null; dd if=/dev/zero of=$d bs=1M count=100 conv=notrunc 2>/dev/null; echo "Wiped $d"; done'
   delegate_to: localhost
   changed_when: true
 
-- name: Write ISO to live boot disk on target server
+- name: Run coreos-installer install from rescue
   ansible.builtin.command:
     cmd: >-
       ssh {{ hetzner_ssh_opts }} root@{{ ansible_host }}
-      dd if=/tmp/node.iso of={{ hostvars[inventory_hostname].live_iso_device | default(live_iso_device) }} bs=4M
+      coreos-installer install
+      -n
+      -i /tmp/bip.ign
+      {{ hostvars[inventory_hostname].live_iso_device | default(live_iso_device) }}
   delegate_to: localhost
   changed_when: true
-  timeout: 600
-  register: _dd_result
+  timeout: 900
+  register: _ci_result
 
-- name: Sync disk writes on target server
-  ansible.builtin.command:
-    cmd: >-
-      ssh {{ hetzner_ssh_opts }} root@{{ ansible_host }} sync
-  delegate_to: localhost
-  changed_when: false
-
-- name: Report dd result
+- name: Report coreos-installer result
   ansible.builtin.debug:
-    msg: >-
-      ISO written to {{ hostvars[inventory_hostname].live_iso_device | default(live_iso_device) }}
-      (BIP install-to-disk target: {{ hostvars[inventory_hostname].installation_disk | default(installation_disk) }}):
-      {{ _dd_result.stderr_lines | last | default('done') }}
+    msg: "coreos-installer install completed on {{ hostvars[inventory_hostname].live_iso_device | default(live_iso_device) }}"
 
 # ── Deactivate rescue and reboot into CoreOS ──────────────────────────
 
@@ -235,10 +214,11 @@
   ansible.builtin.debug:
     msg:
       - "============================================="
-      - "Server {{ ansible_host }} is now booting CoreOS live ISO from {{ hostvars[inventory_hostname].live_iso_device | default(live_iso_device) }}."
-      - "BIP will bootstrap in the live environment, then install-to-disk"
-      - "will write the final OS to {{ hostvars[inventory_hostname].installation_disk | default(installation_disk) }}."
+      - "Server {{ ansible_host }} booting CoreOS from {{ hostvars[inventory_hostname].live_iso_device | default(live_iso_device) }}."
+      - "BIP ignition will fire on the installed system."
+      - "install-to-disk will write the final OS to {{ hostvars[inventory_hostname].installation_disk | default(installation_disk) }}."
       - "The bootstrap-in-place process will take ~30-45 minutes."
+      - "NOTE: This is the rescue_install path (BIP on installed system)."
       - "============================================="
 
 - name: Wait for CoreOS node to become reachable via SSH
@@ -252,8 +232,6 @@
   failed_when: false
   delegate_to: localhost
 
-# ── Post-boot validation ─────────────────────────────────────────────
-
 - name: Verify CoreOS booted (not rescue or old OS)
   ansible.builtin.command:
     cmd: >-
@@ -265,39 +243,12 @@
   failed_when: "'CoreOS' not in _coreos_check.stdout"
   when: _ssh_wait.state is defined and _ssh_wait.state == 'started'
 
-- name: Verify ignition was applied on booted system
-  ansible.builtin.command:
-    cmd: >-
-      ssh {{ hetzner_ssh_opts }} core@{{ ansible_host }}
-      cat /etc/.ignition-result.json
-  delegate_to: localhost
-  register: _ignition_check
-  changed_when: false
-  failed_when: _ignition_check.rc != 0
-  when: _ssh_wait.state is defined and _ssh_wait.state == 'started'
-
-- name: Verify release image is pullable from booted node
-  ansible.builtin.command:
-    cmd: >-
-      ssh {{ hetzner_ssh_opts }} core@{{ ansible_host }}
-      sudo podman pull --quiet {{ _release_image }}
-  delegate_to: localhost
-  register: _post_pull_check
-  changed_when: false
-  retries: 3
-  delay: 15
-  until: _post_pull_check.rc == 0
-  failed_when: false
-  when: _ssh_wait.state is defined and _ssh_wait.state == 'started'
-
-- name: Report post-boot validation
+- name: Report post-boot status
   ansible.builtin.debug:
     msg: >-
       {% if _ssh_wait.state is defined and _ssh_wait.state == 'started' %}
-      POST-BOOT VALIDATION:
-        CoreOS: {{ 'OK' if 'CoreOS' in (_coreos_check.stdout | default('')) else 'FAILED' }}
-        Ignition: {{ 'OK' if (_ignition_check.rc | default(1)) == 0 else 'FAILED' }}
-        Release image pull: {{ 'OK' if (_post_pull_check.rc | default(1)) == 0 else 'FAILED' }}
+      CoreOS booted via rescue_install path.
+      CoreOS: {{ 'OK' if 'CoreOS' in (_coreos_check.stdout | default('')) else 'FAILED' }}
       {% else %}
       WARNING: Node {{ inventory_hostname }} did not become reachable within {{ boot_wait_timeout }}s.
       Check server console via Hetzner Robot panel or KVM.

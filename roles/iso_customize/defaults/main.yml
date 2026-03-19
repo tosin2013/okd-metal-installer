@@ -20,5 +20,13 @@ config_serve_port: 8080
 # Target disk for CoreOS installation
 dest_device: /dev/sda
 
+# Disk where install-to-disk.service writes the final OS (BIP/SNO only).
+# Defaults to dest_device. On dual-disk BIOS servers, set this to the
+# secondary disk so the live ISO can run from the primary disk.
+installation_disk: "{{ dest_device }}"
+
 # Additional CA certificate for disconnected mirrors
 additional_trust_bundle_path: ""
+
+# Cluster topology (set by preflight role, used to select ignition embedding method)
+cluster_topology: sno

@@ -33,19 +33,36 @@
   register: _network_keyfiles
   failed_when: false
 
+- name: Detect if MBR wipe ignition fragment exists (dual-disk BIP)
+  ansible.builtin.stat:
+    path: "{{ ignition_output_dir }}/mbr-wipe.ign"
+  register: _mbr_wipe_ign
+  when: cluster_topology == 'sno'
+
 - name: Build coreos-installer iso customize command for {{ _current_host }}
   ansible.builtin.set_fact:
     _customize_cmd: >-
       coreos-installer iso customize
+      {% if cluster_topology == 'sno' %}
+      --live-ignition {{ _ignition_file | trim }}
+      {% if _mbr_wipe_ign.stat.exists | default(false) %}
+      --live-ignition {{ ignition_output_dir }}/mbr-wipe.ign
+      {% endif %}
+      {% else %}
       --dest-device {{ hostvars[_current_host].dest_device | default(dest_device) }}
       --dest-ignition {{ _ignition_file | trim }}
+      --post-install {{ playbook_dir }}/../files/discovery-agent.sh
+      {% endif %}
       {% for keyfile in _network_keyfiles.files | default([]) %}
       --network-keyfile {{ keyfile.path }}
       {% endfor %}
       {% if additional_trust_bundle_path | length > 0 %}
+      {% if cluster_topology == 'sno' %}
+      --ignition-ca {{ additional_trust_bundle_path }}
+      {% else %}
       --dest-ca-cert {{ additional_trust_bundle_path }}
       {% endif %}
-      --post-install {{ playbook_dir }}/../files/discovery-agent.sh
+      {% endif %}
       -o {{ iso_output_dir }}/{{ _current_host }}.iso
       {{ iso_cache_dir }}/{{ _iso_filename }}
 

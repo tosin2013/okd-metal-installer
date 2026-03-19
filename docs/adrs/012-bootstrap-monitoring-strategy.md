@@ -77,10 +77,25 @@ Produce a structured summary showing node status, cluster version, operator heal
 - ADR-011: Boot delivery strategy (precedes this phase in the pipeline)
 - ADR-010: Ignition configuration generation (produces the kubeconfig used for validation)
 
-## Lessons Learned (First Deployment)
+## Lessons Learned
+
+### First Deployment (88.99.65.35)
 
 1. Always wipe secondary disks before writing the boot ISO on multi-disk servers
 2. SSH port reachability is necessary but not sufficient for bootstrap success
 3. The `openshift-install wait-for` command is the canonical way to track progress
 4. API healthz (even with 401) is the earliest machine-readable signal of bootstrap progress
 5. KVM/console access is invaluable for debugging -- consider documenting how to access it for each hosting provider
+
+### Second Deployment Cycle (88.99.140.83, March 2026)
+
+6. **Post-boot validation belongs in `boot_deliver`, not `bootstrap_monitor`**: The `boot_deliver` role now runs three post-boot checks immediately after SSH becomes reachable -- before handing off to `bootstrap_monitor`:
+   - Verify `/etc/os-release` contains "CoreOS" (not rescue or stale OS)
+   - Verify `/etc/.ignition-result.json` exists (Ignition applied successfully)
+   - Test-pull the release image from the booted node (bootstrap chain will succeed)
+
+   This catches boot-into-wrong-OS scenarios 30+ minutes earlier than waiting for `bootstrap_monitor` to time out on API health checks.
+
+7. **Pre-boot validation is equally important**: A stale release image digest caused `release-image.service` to fail on first boot, which was only visible via `journalctl` on the node. The `boot_deliver` role now validates the release image is pullable *before* writing the ISO to disk (see ADR-011). This prevents scenarios where `bootstrap_monitor` waits indefinitely for an API server that will never start.
+
+8. **Tag-based execution enables targeted re-runs**: Adding `tags: [boot]` and `tags: [monitor]` to `site.yml` plays allows running `--tags monitor` independently to retry bootstrap monitoring without re-running the entire boot delivery sequence. This is particularly useful when a deployment stalls and the operator wants to re-check after manual intervention.

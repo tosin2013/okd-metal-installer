@@ -55,20 +55,61 @@ For Hetzner dedicated servers that lack Redfish/IPMI virtual media, the Hetzner 
 2. Activates the Hetzner Linux rescue system via `POST /boot/{server-ip}/rescue`
 3. Performs a hardware reset via `POST /reset/{server-ip}` to boot into rescue
 4. Waits for the rescue system to become reachable via SSH
-5. **Wipes all disks** in the rescue system to prevent boot order confusion on multi-disk servers (critical for servers with multiple NVMe drives)
-6. Downloads the customized ISO from the jumpbox's config HTTP server to the rescue system via `wget`
-7. Writes the ISO directly to the target boot disk using `dd`
-8. Deactivates rescue mode via `DELETE /boot/{server-ip}/rescue`
-9. Hardware resets the server to boot CoreOS from the written disk
-10. Waits for the CoreOS node to become reachable via SSH
+5. Downloads the customized ISO from the jumpbox's config HTTP server to the rescue system via `wget`
+6. **Pre-dd validation**: verifies the release image embedded in `openshift-install` is pullable from the container registry (runs on the jumpbox, not rescue -- see Lessons Learned). If validation fails, the playbook aborts *before* touching any disks, leaving the server in a recoverable rescue state.
+7. **Wipes all disks** to prevent boot order confusion on multi-disk servers (only after validation passes)
+8. Writes the ISO to `live_iso_device` using `dd` (split into separate `dd` and `sync` tasks -- see Lessons Learned)
+9. Deactivates rescue mode via `DELETE /boot/{server-ip}/rescue`
+10. Hardware resets the server to boot the live CoreOS ISO from `live_iso_device`
+11. The BIP Ignition fires in the live ISO environment, bootstraps the cluster (~30-45 min), then `install-to-disk.service` writes the final OS to `installation_disk`
+12. On dual-disk servers, an MBR wipe service removes the bootloader from `live_iso_device` before the automatic reboot, forcing BIOS to fall through to `installation_disk`
+13. Waits for the CoreOS node to become reachable via SSH on the final installed system
+14. **Post-boot validation**: verifies CoreOS booted (not rescue or stale OS), Ignition was applied, and the release image is pullable from the running node
 
 Required per-host inventory variables for Hetzner mode:
 - `hetzner_robot_user`: Robot webservice username (recommend Ansible Vault)
 - `hetzner_robot_password`: Robot webservice password (recommend Ansible Vault)
 - `hetzner_ssh_key_fingerprint`: Fingerprint of the SSH key registered with Robot
-- `dest_device`: Target disk device path (e.g., `/dev/nvme0n1`)
 
-**Multi-disk consideration**: Hetzner auction/dedicated servers frequently have multiple identical drives. The disk wipe step (introduced after a failed first deployment) ensures that only the target disk contains bootable data, preventing EFI boot order confusion after `coreos-installer install` rewrites the partition table during bootstrap-in-place.
+**Disk variables for Hetzner mode (see ADR-003 for BIP architecture):**
+
+| Variable | Purpose | Example | Default |
+|----------|---------|---------|---------|
+| `live_iso_device` | Disk where the ISO is `dd`'d; BIOS boots this first | `/dev/nvme0n1` | `{{ dest_device }}` |
+| `installation_disk` | Disk where `install-to-disk.service` writes the final OS | `/dev/nvme1n1` | `{{ dest_device }}` |
+| `dest_device` | Legacy variable, used as default for both above | `/dev/nvme0n1` | `/dev/sda` |
+
+On single-disk servers, all three variables point to the same disk and the standard BIP flow works (boot from external media, install to local disk). On multi-disk BIOS servers where `dd` is used instead of external media, `live_iso_device` and `installation_disk` must differ.
+
+**Multi-disk BIOS consideration**: Hetzner auction/dedicated servers frequently have multiple identical NVMe drives. When booting from a `dd`'d ISO (no USB/virtual CD), the live ISO occupies one disk and `install-to-disk.service` must write to the other. An MBR wipe systemd service (injected via a supplementary live Ignition fragment) clears the live ISO disk's bootloader after installation completes, ensuring the BIOS falls through to the installation disk on reboot.
+
+### Mode 3b: Hetzner Robot with coreos-installer from rescue (`boot_method: hetzner`, `hetzner_install_method: rescue_install`)
+
+An alternative path for Hetzner servers that bypasses the live ISO phase entirely:
+
+1. Steps 1-6 same as Mode 3
+2. Downloads the `coreos-installer` binary to the rescue system
+3. Downloads the modified BIP Ignition from the jumpbox
+4. Runs `coreos-installer install -i BIP.ign <live_iso_device>` from rescue, which writes CoreOS + BIP Ignition directly to disk
+5. Deactivates rescue, hardware resets
+6. BIOS boots the installed CoreOS; BIP Ignition fires on the installed system
+7. `install-to-disk.service` writes to `installation_disk`, MBR wipe removes the first-boot disk's bootloader, system reboots
+
+**Caution**: This path runs BIP on an installed system rather than a live ISO. The BIP Ignition (`bootstrap-in-place-for-live-iso.ign`) was designed for the live ISO environment. While this approach has been observed to work, it is less tested than Mode 3 and may encounter edge cases with overlay filesystem behavior or space constraints.
+
+### Fallback: Manual VNC/KVM ISO mount
+
+When automated boot delivery encounters issues (emergency mode, boot order problems, etc.), operators can fall back to manual ISO mounting:
+
+1. Order a KVM Console via Hetzner Robot (Support tab, "Remote console / KVM")
+2. Access the KVM web interface and use the Virtual Media feature to mount the ISO from an HTTP/SMB URL
+3. Alternatively, request a USB stick -- Hetzner technicians will create a bootable USB from a provided ISO download link (free of charge)
+4. Boot from the virtual CD or USB; standard single-disk BIP flow proceeds without dual-disk complexity
+5. After installation, remove the virtual media or USB
+
+**Cost**: KVM Console is free for the first 3 hours; additional 3-hour blocks cost EUR 8.40. Virtual media requires SMB/CIFS access. If the jumpbox has VNC access (see ADR-007), operators can use it to access the Hetzner Robot panel and order KVM from there.
+
+This fallback eliminates all dual-disk and MBR wipe complexity since the ISO boots from virtual/removable media while `install-to-disk` writes to the local NVMe disk.
 
 ### Compatible BMC Firmware (Redfish)
 
@@ -102,6 +143,48 @@ Required per-host inventory variables for Hetzner mode:
 - No IPMI fallback for servers with IPMI but not Redfish (could be added later)
 - Hetzner mode requires the jumpbox HTTP server to be reachable from the rescue system (same Hetzner network)
 - Hetzner Robot API credentials grant broad server control -- must be vaulted
+
+## Lessons Learned (Deployments on 88.99.140.83, March 2026)
+
+### 1. Pre-dd validation prevents unrecoverable state
+
+The original step sequence wiped disks before downloading the ISO, meaning any subsequent failure (bad ISO, stale release image) left the server with blank disks and no way to recover without KVM or re-entering rescue. The revised sequence downloads and validates first, then wipes. If the release image is unpullable (e.g., garbage-collected from quay.io), the playbook aborts while the server is still in rescue with disks intact.
+
+### 2. Hetzner rescue is minimal -- no container runtime
+
+The Hetzner rescue system is a stripped-down Debian environment. It does **not** include `podman`, `skopeo`, or any container tooling. An initial attempt to test-pull the release image via `podman pull` on the rescue system failed with `command not found`. Release image validation must run on the **jumpbox** (which has `podman` installed), not via SSH to the rescue system. The network path to quay.io is equivalent from both systems (same Hetzner DC), so the validation result is transferable.
+
+### 3. `dd` via `ansible.builtin.shell` crashes silently
+
+Using `ansible.builtin.shell` with a complex SSH-piped `dd` command (including `status=progress` and chained `&& sync`) caused Ansible to exit with code 2 and no error message. This happened consistently across multiple runs. The fix:
+
+- Split into two `ansible.builtin.command` tasks: one for `dd`, one for `sync`
+- Remove `status=progress` (the progress output on stderr appears to overwhelm Ansible's output handler when piped through SSH)
+- Add an explicit `timeout: 600` to the `dd` task
+
+### 4. Post-boot validation catches wrong-OS boot
+
+After the server reboots from the written disk, SSH becoming reachable does not guarantee CoreOS booted. The server could boot into rescue (if rescue wasn't properly deactivated) or a stale OS from a secondary disk. Post-boot validation checks `/etc/os-release` for "CoreOS", verifies `/etc/.ignition-result.json` exists, and test-pulls the release image to confirm the bootstrap chain will succeed.
+
+### 5. Release image lifecycle is a deployment risk
+
+The `openshift-install` binary embeds a specific release image digest. OKD SCOS releases on quay.io can be garbage-collected, causing the embedded digest to become unpullable. This breaks the entire bootstrap chain at `release-image.service` on first boot. Pre-dd validation now catches this, but operators should verify the `openshift-install` binary's embedded image is still available before starting a deployment. See ADR-003 for broader implications.
+
+### 6. `--dest-ignition` + `--dest-device` is incompatible with BIP
+
+The initial implementation used `coreos-installer iso customize --dest-device /dev/nvme0n1 --dest-ignition bootstrap-in-place-for-live-iso.ign`. This caused a chain of failures:
+
+1. `--dest-device` triggered an automatic `coreos-installer install` during initramfs, writing CoreOS to the target disk and rebooting
+2. After reboot, the BIP Ignition fired on the installed system
+3. `install-to-disk.service` attempted `coreos-installer install` against the same disk, which failed with "found busy partitions" because the disk was mounted as the running root
+
+The fix: switch to `--live-ignition` (equivalent to `iso ignition embed`), which embeds the BIP Ignition into the live ISO environment where the bootstrap is designed to run. See ADR-003 for the complete analysis of `--live-ignition` vs `--dest-ignition`.
+
+### 7. BIOS-mode dual-disk servers need MBR wipe for boot fallthrough
+
+On the Hetzner server 88.99.140.83 (BIOS/Legacy mode, two NVMe disks), the boot order is PXE first, then local disk (nvme0n1 first). When the ISO is `dd`'d to nvme0n1 and the final OS is installed to nvme1n1 by `install-to-disk.service`, the system would reboot back into the live ISO on nvme0n1 indefinitely.
+
+The solution: inject a systemd service via a supplementary live Ignition fragment that wipes the first 512 bytes (MBR) of nvme0n1 after `install-to-disk.service` completes but before the scheduled reboot (`shutdown -r +1` provides a 1-minute window). With the MBR zeroed, BIOS skips nvme0n1 and falls through to nvme1n1 where the final OS resides.
 
 ## Implementation Plan
 

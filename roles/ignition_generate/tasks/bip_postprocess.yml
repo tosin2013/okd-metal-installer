@@ -1,0 +1,30 @@
+---
+# Post-process the generated BIP ignition to:
+# 1. Add --copy-network to install-to-disk.sh so static IP config
+#    persists from the live ISO environment to the installed system
+# 2. Generate the MBR wipe ignition fragment for dual-disk BIOS servers
+#
+# See ADR-003 "Network config persistence" and "Dual-disk BIP on BIOS-mode servers"
+
+- name: Read BIP ignition file
+  ansible.builtin.slurp:
+    src: "{{ ignition_output_dir }}/bootstrap-in-place-for-live-iso.ign"
+  register: _bip_ign_raw
+
+- name: Patch install-to-disk.sh to add --copy-network
+  ansible.builtin.script:
+    cmd: "{{ role_path }}/files/patch-install-to-disk.py {{ ignition_output_dir }}/bootstrap-in-place-for-live-iso.ign"
+    executable: /usr/bin/python3
+  register: _patch_result
+  changed_when: "'PATCHED' in _patch_result.stdout"
+
+- name: Report BIP ignition patch result
+  ansible.builtin.debug:
+    msg: "{{ _patch_result.stdout_lines }}"
+
+- name: Generate MBR wipe ignition fragment for dual-disk boot
+  ansible.builtin.template:
+    src: mbr-wipe-ignition.json.j2
+    dest: "{{ ignition_output_dir }}/mbr-wipe.ign"
+    mode: "0600"
+  when: live_iso_device | default(dest_device) != installation_disk | default(dest_device)

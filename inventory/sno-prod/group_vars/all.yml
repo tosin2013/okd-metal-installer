@@ -10,9 +10,11 @@ dns_ttl: 300
 pull_secret_path: "{{ playbook_dir }}/../pull-secret.json"
 ssh_key_path: "~/.ssh/id_ed25519.pub"
 
-scos_iso_url: "https://rhcos.mirror.openshift.com/art/storage/prod/streams/c10s/builds/10.0.20251103-0/x86_64/scos-10.0.20251103-0-live-iso.x86_64.iso"
+scos_iso_url: "https://rhcos.mirror.openshift.com/art/storage/prod/streams/c10s/builds/10.0.20260310-0/x86_64/scos-10.0.20260310-0-live-iso.x86_64.iso"
 
 dest_device: /dev/nvme0n1
+live_iso_device: /dev/nvme0n1
+installation_disk: /dev/nvme1n1
 jumpbox_ip: "176.9.223.218"
 
 boot_wait_timeout: 3600
