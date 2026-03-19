@@ -182,7 +182,7 @@
 
 | Task ID | Task | Description | ADR | Status |
 |---------|------|-------------|-----|--------|
-| P11-01 | Let's Encrypt wildcard certificate | Install cert-manager, configure DNS-01 ClusterIssuer via Route 53, issue `*.apps` wildcard cert, patch IngressController | 013 | Pending |
+| P11-01 | Let's Encrypt wildcard certificate | Install cert-manager, configure DNS-01 ClusterIssuer via Route 53, issue `*.apps` wildcard cert, patch IngressController | 013 | Done |
 | P11-02 | API server trusted certificate | (Optional) Issue cert for `api.<cluster>.<domain>` and patch kube-apiserver serving cert | 013 | Pending |
 | P11-03 | Post-install validation playbook | Smoke tests: node Ready, all ClusterOperators Available, console reachable, OAuth functional | 012 | Pending |
 | P11-04 | Cluster backup strategy | etcd snapshot automation, backup schedule, restore runbook | -- | Pending |
@@ -225,5 +225,5 @@ Phase 11 (Day-2 Ops) -- depends on successful deployment (Phase 8)
 | 8 - Integration | 5 | 1 | 3 | 1 | 0 | Partial (SNO validated) |
 | 9 - Operational Hardening | 6 | -- | -- | -- | -- | Done |
 | 10 - BIP Boot Fix | 8 | -- | -- | -- | -- | Done |
-| 11 - Day-2 Operations | 5 | -- | -- | -- | -- | Planned |
+| 11 - Day-2 Operations | 5 | -- | -- | -- | -- | Partial |
 | **Total** | **65** | **11** | **16** | **15** | **4** | |

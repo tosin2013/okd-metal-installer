@@ -1,0 +1,12 @@
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: apps-wildcard
+  namespace: openshift-ingress
+spec:
+  secretName: apps-wildcard-tls
+  issuerRef:
+    name: letsencrypt-{{ 'staging' if certmanager_use_staging else 'production' }}
+    kind: ClusterIssuer
+  dnsNames:
+  - "*.apps.{{ cluster_name }}.{{ base_domain }}"

@@ -1,0 +1,40 @@
+---
+- name: Check for apps wildcard cert backup
+  ansible.builtin.stat:
+    path: "{{ certmanager_certs_backup_dir }}/apps-wildcard-tls.yaml"
+  register: _apps_backup
+
+- name: Fail if no certificate backup found
+  ansible.builtin.fail:
+    msg: >-
+      No certificate backup found at {{ certmanager_certs_backup_dir }}/apps-wildcard-tls.yaml.
+      Run a fresh issuance first (certmanager_restore_certs=false).
+  when: not _apps_backup.stat.exists
+
+- name: Restore apps wildcard TLS secret
+  ansible.builtin.command:
+    cmd: oc apply -f {{ certmanager_certs_backup_dir }}/apps-wildcard-tls.yaml
+  environment:
+    KUBECONFIG: "{{ _kubeconfig }}"
+  register: _restore_apps
+  changed_when: "'created' in _restore_apps.stdout"
+
+- name: Check for API cert backup
+  ansible.builtin.stat:
+    path: "{{ certmanager_certs_backup_dir }}/api-tls.yaml"
+  register: _api_backup
+
+- name: Restore API TLS secret
+  ansible.builtin.command:
+    cmd: oc apply -f {{ certmanager_certs_backup_dir }}/api-tls.yaml
+  environment:
+    KUBECONFIG: "{{ _kubeconfig }}"
+  register: _restore_api
+  changed_when: "'created' in _restore_api.stdout"
+  when: _api_backup.stat.exists and (certmanager_issue_api_cert | bool)
+
+- name: Report restore result
+  ansible.builtin.debug:
+    msg: >-
+      Certificates restored from {{ certmanager_certs_backup_dir }}/.
+      Install cert-manager operator separately if you want automatic renewal.

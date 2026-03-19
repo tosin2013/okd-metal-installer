@@ -1,0 +1,27 @@
+---
+certmanager_enabled: true
+
+# ACME / Let's Encrypt
+certmanager_acme_email: "admin@{{ base_domain }}"
+certmanager_acme_server: "https://acme-v02.api.letsencrypt.org/directory"
+certmanager_use_staging: false
+certmanager_staging_server: "https://acme-staging-v02.api.letsencrypt.org/directory"
+
+# AWS / Route 53 for DNS-01 solver
+certmanager_aws_region: "eu-central-1"
+
+# Operator installation
+certmanager_channel: "stable-v1"
+certmanager_source: "community-operators"
+certmanager_operator_wait_timeout: 180
+
+# Certificate issuance
+certmanager_cert_wait_timeout: 300
+certmanager_issue_api_cert: false
+
+# Backup / restore
+certmanager_certs_backup_dir: "{{ playbook_dir }}/../certs"
+certmanager_restore_certs: false
+
+# Shared paths
+ignition_output_dir: "{{ playbook_dir }}/../ignition-output"

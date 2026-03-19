@@ -87,11 +87,21 @@ Backed-up certificate Secrets are stored in the `certs/` directory (gitignored) 
 
 ### Ansible Integration
 
-Two options for operationalizing this:
+Implemented as `roles/cert_manager/`, integrated into `playbooks/site.yml` as Phase 8 (tag: `certs`). The role:
 
-1. **Runbook only** (recommended for now): Document the manual `oc` commands in a runbook. Certificate setup is a one-time day-2 operation with automatic renewal, so full Ansible automation has limited value.
+1. Installs the cert-manager operator from OperatorHub
+2. Creates the AWS credentials Secret from environment variables (same `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` used by `dns_configure`)
+3. Configures a ClusterIssuer with DNS-01/Route 53 solver
+4. Issues the `*.apps` wildcard Certificate (and optionally the API cert via `certmanager_issue_api_cert: true`)
+5. Patches the IngressController and waits for router rollout
+6. Verifies the certificate is served correctly
+7. Backs up the TLS Secrets to `certs/` for reuse across redeployments
 
-2. **Post-deploy role** (future): Create a `roles/cert_manager/` Ansible role that installs the operator, configures the ClusterIssuer, and issues certificates. This becomes valuable if clusters are deployed frequently.
+**Certificate restore**: Set `certmanager_restore_certs: true` to skip operator installation and issuance, instead restoring previously backed-up Secrets. This avoids Let's Encrypt rate limits during rapid iteration.
+
+**Staging mode**: Set `certmanager_use_staging: true` for first-time testing against the Let's Encrypt staging server.
+
+The runbook at `docs/runbooks/letsencrypt-cert-setup.md` remains as reference documentation for manual execution or troubleshooting.
 
 ### Certificate Resources
 

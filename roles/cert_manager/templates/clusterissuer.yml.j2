@@ -1,0 +1,21 @@
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-{{ 'staging' if certmanager_use_staging else 'production' }}
+spec:
+  acme:
+    server: {{ certmanager_staging_server if certmanager_use_staging else certmanager_acme_server }}
+    email: {{ certmanager_acme_email }}
+    privateKeySecretRef:
+      name: letsencrypt-{{ 'staging' if certmanager_use_staging else 'production' }}-key
+    solvers:
+    - dns01:
+        route53:
+          region: {{ certmanager_aws_region }}
+          hostedZoneID: {{ route53_zone_id }}
+          accessKeyIDSecretRef:
+            name: aws-route53-credentials
+            key: access-key-id
+          secretAccessKeySecretRef:
+            name: aws-route53-credentials
+            key: secret-access-key

@@ -1,0 +1,60 @@
+---
+- name: Create cert-manager-operator namespace
+  ansible.builtin.command:
+    cmd: oc apply -f -
+    stdin: "{{ lookup('template', 'namespace.yml.j2') }}"
+  environment:
+    KUBECONFIG: "{{ _kubeconfig }}"
+  register: _ns_result
+  changed_when: "'created' in _ns_result.stdout"
+
+- name: Create OperatorGroup
+  ansible.builtin.command:
+    cmd: oc apply -f -
+    stdin: "{{ lookup('template', 'operatorgroup.yml.j2') }}"
+  environment:
+    KUBECONFIG: "{{ _kubeconfig }}"
+  register: _og_result
+  changed_when: "'created' in _og_result.stdout"
+
+- name: Create Subscription
+  ansible.builtin.command:
+    cmd: oc apply -f -
+    stdin: "{{ lookup('template', 'subscription.yml.j2') }}"
+  environment:
+    KUBECONFIG: "{{ _kubeconfig }}"
+  register: _sub_result
+  changed_when: "'created' in _sub_result.stdout"
+
+- name: Wait for cert-manager namespace to exist
+  ansible.builtin.command:
+    cmd: oc get namespace cert-manager
+  environment:
+    KUBECONFIG: "{{ _kubeconfig }}"
+  register: _cm_ns
+  until: _cm_ns.rc == 0
+  retries: 30
+  delay: 10
+  changed_when: false
+
+- name: Wait for cert-manager deployment to be available
+  ansible.builtin.command:
+    cmd: >-
+      oc wait --for=condition=Available deployment/cert-manager
+      -n cert-manager --timeout={{ certmanager_operator_wait_timeout }}s
+  environment:
+    KUBECONFIG: "{{ _kubeconfig }}"
+  changed_when: false
+
+- name: Wait for cert-manager-webhook deployment to be available
+  ansible.builtin.command:
+    cmd: >-
+      oc wait --for=condition=Available deployment/cert-manager-webhook
+      -n cert-manager --timeout={{ certmanager_operator_wait_timeout }}s
+  environment:
+    KUBECONFIG: "{{ _kubeconfig }}"
+  changed_when: false
+
+- name: Report cert-manager operator status
+  ansible.builtin.debug:
+    msg: "cert-manager operator installed and ready"

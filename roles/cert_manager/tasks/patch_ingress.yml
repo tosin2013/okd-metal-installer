@@ -1,0 +1,43 @@
+---
+- name: Patch IngressController to use wildcard certificate
+  ansible.builtin.command:
+    cmd: >-
+      oc patch ingresscontroller default
+      -n openshift-ingress-operator
+      --type=merge
+      -p '{"spec":{"defaultCertificate":{"name":"apps-wildcard-tls"}}}'
+  environment:
+    KUBECONFIG: "{{ _kubeconfig }}"
+  register: _patch_ingress
+  changed_when: "'patched' in _patch_ingress.stdout"
+
+- name: Wait for router rollout to complete
+  ansible.builtin.command:
+    cmd: >-
+      oc rollout status deployment/router-default
+      -n openshift-ingress --timeout=120s
+  environment:
+    KUBECONFIG: "{{ _kubeconfig }}"
+  changed_when: false
+
+- name: Patch API server with trusted certificate
+  ansible.builtin.command:
+    cmd: >-
+      oc patch apiserver cluster
+      --type=merge
+      -p '{"spec":{"servingCerts":{"namedCertificates":[{"names":["api.{{ cluster_name }}.{{ base_domain }}"],"servingCertificate":{"name":"api-tls"}}]}}}'
+  environment:
+    KUBECONFIG: "{{ _kubeconfig }}"
+  register: _patch_api
+  changed_when: "'patched' in _patch_api.stdout"
+  when: certmanager_issue_api_cert | bool
+
+- name: Wait for kube-apiserver rollout (may take 1-2 minutes on SNO)
+  ansible.builtin.command:
+    cmd: >-
+      oc wait --for=condition=Progressing=False
+      clusteroperator/kube-apiserver --timeout=300s
+  environment:
+    KUBECONFIG: "{{ _kubeconfig }}"
+  changed_when: false
+  when: certmanager_issue_api_cert | bool

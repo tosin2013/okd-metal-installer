@@ -1,0 +1,12 @@
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: api-cert
+  namespace: openshift-config
+spec:
+  secretName: api-tls
+  issuerRef:
+    name: letsencrypt-{{ 'staging' if certmanager_use_staging else 'production' }}
+    kind: ClusterIssuer
+  dnsNames:
+  - "api.{{ cluster_name }}.{{ base_domain }}"

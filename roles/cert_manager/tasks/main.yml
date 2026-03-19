@@ -1,0 +1,38 @@
+---
+- name: Set KUBECONFIG for oc commands
+  ansible.builtin.set_fact:
+    _kubeconfig: "{{ ignition_output_dir }}/auth/kubeconfig"
+
+- name: Verify cluster is accessible
+  ansible.builtin.command:
+    cmd: oc get clusterversion
+  environment:
+    KUBECONFIG: "{{ _kubeconfig }}"
+  register: _cluster_check
+  changed_when: false
+  failed_when: _cluster_check.rc != 0
+
+- name: Restore certificates from backup
+  ansible.builtin.include_tasks: restore_certs.yml
+  when: certmanager_restore_certs | bool
+
+- name: Install cert-manager operator
+  ansible.builtin.include_tasks: install_operator.yml
+  when: not (certmanager_restore_certs | bool)
+
+- name: Configure ClusterIssuer with DNS-01 solver
+  ansible.builtin.include_tasks: configure_issuer.yml
+  when: not (certmanager_restore_certs | bool)
+
+- name: Issue wildcard certificate
+  ansible.builtin.include_tasks: issue_certificate.yml
+  when: not (certmanager_restore_certs | bool)
+
+- name: Patch IngressController with new certificate
+  ansible.builtin.include_tasks: patch_ingress.yml
+
+- name: Verify certificate deployment
+  ansible.builtin.include_tasks: verify.yml
+
+- name: Backup certificates for reuse
+  ansible.builtin.include_tasks: backup_certs.yml

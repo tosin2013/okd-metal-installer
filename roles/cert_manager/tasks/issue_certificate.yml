@@ -1,0 +1,57 @@
+---
+- name: Request wildcard certificate for *.apps.{{ cluster_name }}.{{ base_domain }}
+  ansible.builtin.command:
+    cmd: oc apply -f -
+    stdin: "{{ lookup('template', 'certificate-apps.yml.j2') }}"
+  environment:
+    KUBECONFIG: "{{ _kubeconfig }}"
+  register: _cert_apps_result
+  changed_when: "'created' in _cert_apps_result.stdout"
+
+- name: Wait for apps wildcard certificate to be issued
+  ansible.builtin.command:
+    cmd: >-
+      oc get certificate apps-wildcard -n openshift-ingress
+      -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}'
+  environment:
+    KUBECONFIG: "{{ _kubeconfig }}"
+  register: _cert_apps_ready
+  until: _cert_apps_ready.stdout == 'True'
+  retries: "{{ (certmanager_cert_wait_timeout | int / 10) | int }}"
+  delay: 10
+  changed_when: false
+
+- name: Report apps certificate status
+  ansible.builtin.debug:
+    msg: >-
+      Wildcard certificate for *.apps.{{ cluster_name }}.{{ base_domain }} issued
+      ({{ 'staging' if certmanager_use_staging else 'production' }})
+
+- name: Request API server certificate
+  ansible.builtin.command:
+    cmd: oc apply -f -
+    stdin: "{{ lookup('template', 'certificate-api.yml.j2') }}"
+  environment:
+    KUBECONFIG: "{{ _kubeconfig }}"
+  register: _cert_api_result
+  changed_when: "'created' in _cert_api_result.stdout"
+  when: certmanager_issue_api_cert | bool
+
+- name: Wait for API certificate to be issued
+  ansible.builtin.command:
+    cmd: >-
+      oc get certificate api-cert -n openshift-config
+      -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}'
+  environment:
+    KUBECONFIG: "{{ _kubeconfig }}"
+  register: _cert_api_ready
+  until: _cert_api_ready.stdout == 'True'
+  retries: "{{ (certmanager_cert_wait_timeout | int / 10) | int }}"
+  delay: 10
+  changed_when: false
+  when: certmanager_issue_api_cert | bool
+
+- name: Report API certificate status
+  ansible.builtin.debug:
+    msg: "API certificate for api.{{ cluster_name }}.{{ base_domain }} issued"
+  when: certmanager_issue_api_cert | bool
