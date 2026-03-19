@@ -1,0 +1,190 @@
+---
+- name: Add Rook Helm repository
+  ansible.builtin.command:
+    cmd: helm repo add rook-release {{ rook_helm_repo }}
+  environment:
+    KUBECONFIG: "{{ _kubeconfig }}"
+  register: _repo_add
+  changed_when: "'has been added' in _repo_add.stdout"
+  failed_when:
+    - _repo_add.rc != 0
+    - "'already exists' not in _repo_add.stderr"
+
+- name: Update Helm repositories
+  ansible.builtin.command:
+    cmd: helm repo update
+  environment:
+    KUBECONFIG: "{{ _kubeconfig }}"
+  changed_when: true
+
+- name: Check if Rook operator is already installed
+  ansible.builtin.command:
+    cmd: helm status rook-ceph -n {{ rook_namespace }}
+  environment:
+    KUBECONFIG: "{{ _kubeconfig }}"
+  register: _rook_op_status
+  changed_when: false
+  failed_when: false
+
+- name: Install Rook-Ceph operator via Helm
+  when: _rook_op_status.rc != 0
+  block:
+    - name: Build Rook operator Helm command
+      ansible.builtin.set_fact:
+        _rook_op_cmd: >-
+          helm install rook-ceph {{ rook_helm_operator_chart }}
+          --namespace {{ rook_namespace }}
+          --create-namespace
+          --set hostpathRequiresPrivileged=true
+          {% if rook_helm_version %}--version {{ rook_helm_version }}{% endif %}
+          --wait
+          --timeout {{ storage_operator_wait_timeout }}s
+
+    - name: Run Helm install for Rook operator
+      ansible.builtin.command:
+        cmd: "{{ _rook_op_cmd }}"
+      environment:
+        KUBECONFIG: "{{ _kubeconfig }}"
+      changed_when: true
+
+- name: Wait for Rook operator deployment
+  ansible.builtin.command:
+    cmd: >-
+      oc rollout status deployment/rook-ceph-operator
+      -n {{ rook_namespace }}
+      --timeout={{ storage_operator_wait_timeout }}s
+  environment:
+    KUBECONFIG: "{{ _kubeconfig }}"
+  changed_when: false
+
+- name: Check if Rook cluster is already installed
+  ansible.builtin.command:
+    cmd: helm status rook-ceph-cluster -n {{ rook_namespace }}
+  environment:
+    KUBECONFIG: "{{ _kubeconfig }}"
+  register: _rook_cluster_status
+  changed_when: false
+  failed_when: false
+
+- name: Install Rook-Ceph cluster via Helm
+  when: _rook_cluster_status.rc != 0
+  block:
+    - name: Create Rook cluster values file
+      ansible.builtin.copy:
+        content: |
+          operatorNamespace: {{ rook_namespace }}
+          cephClusterSpec:
+            dataDirHostPath: /var/lib/rook
+            mon:
+              count: 3
+              allowMultiplePerNode: false
+            mgr:
+              count: 2
+              allowMultiplePerNode: false
+            storage:
+              useAllNodes: true
+              useAllDevices: false
+              devices:
+          {% for dev in storage_devices %}
+              - name: "{{ dev | basename }}"
+          {% endfor %}
+          cephBlockPools:
+            - name: ceph-blockpool
+              spec:
+                failureDomain: host
+                replicated:
+                  size: {{ rook_ceph_replica_count }}
+              storageClass:
+                enabled: true
+                name: {{ rook_sc_name }}
+                isDefault: {{ storage_default_class | lower }}
+                reclaimPolicy: Delete
+                allowVolumeExpansion: true
+                volumeBindingMode: Immediate
+                parameters:
+                  imageFormat: "2"
+                  imageFeatures: layering
+                  csi.storage.k8s.io/provisioner-secret-name: rook-csi-rbd-provisioner
+                  csi.storage.k8s.io/provisioner-secret-namespace: {{ rook_namespace }}
+                  csi.storage.k8s.io/controller-expand-secret-name: rook-csi-rbd-provisioner
+                  csi.storage.k8s.io/controller-expand-secret-namespace: {{ rook_namespace }}
+                  csi.storage.k8s.io/node-stage-secret-name: rook-csi-rbd-node
+                  csi.storage.k8s.io/node-stage-secret-namespace: {{ rook_namespace }}
+                  csi.storage.k8s.io/fstype: ext4
+          {% if rook_enable_cephfs %}
+          cephFileSystems:
+            - name: ceph-filesystem
+              spec:
+                metadataPool:
+                  replicated:
+                    size: {{ rook_ceph_replica_count }}
+                dataPools:
+                  - failureDomain: host
+                    replicated:
+                      size: {{ rook_ceph_replica_count }}
+                metadataServer:
+                  activeCount: 1
+                  activeStandby: true
+              storageClass:
+                enabled: true
+                name: ceph-filesystem
+                reclaimPolicy: Delete
+                allowVolumeExpansion: true
+                volumeBindingMode: Immediate
+                parameters:
+                  csi.storage.k8s.io/provisioner-secret-name: rook-csi-cephfs-provisioner
+                  csi.storage.k8s.io/provisioner-secret-namespace: {{ rook_namespace }}
+                  csi.storage.k8s.io/controller-expand-secret-name: rook-csi-cephfs-provisioner
+                  csi.storage.k8s.io/controller-expand-secret-namespace: {{ rook_namespace }}
+                  csi.storage.k8s.io/node-stage-secret-name: rook-csi-cephfs-node
+                  csi.storage.k8s.io/node-stage-secret-namespace: {{ rook_namespace }}
+          {% else %}
+          cephFileSystems: []
+          {% endif %}
+          {% if rook_enable_rgw %}
+          cephObjectStores:
+            - name: ceph-objectstore
+              spec:
+                metadataPool:
+                  failureDomain: host
+                  replicated:
+                    size: {{ rook_ceph_replica_count }}
+                dataPool:
+                  failureDomain: host
+                  replicated:
+                    size: {{ rook_ceph_replica_count }}
+                gateway:
+                  port: 8080
+                  instances: 1
+              storageClass:
+                enabled: true
+                name: ceph-bucket
+                reclaimPolicy: Delete
+                volumeBindingMode: Immediate
+          {% else %}
+          cephObjectStores: []
+          {% endif %}
+        dest: /tmp/rook-cluster-values.yml
+        mode: "0644"
+
+    - name: Build Rook cluster Helm command
+      ansible.builtin.set_fact:
+        _rook_cluster_cmd: >-
+          helm install rook-ceph-cluster {{ rook_helm_cluster_chart }}
+          --namespace {{ rook_namespace }}
+          --values /tmp/rook-cluster-values.yml
+          {% if rook_helm_version %}--version {{ rook_helm_version }}{% endif %}
+          --wait
+          --timeout {{ storage_operator_wait_timeout }}s
+
+    - name: Run Helm install for Rook cluster
+      ansible.builtin.command:
+        cmd: "{{ _rook_cluster_cmd }}"
+      environment:
+        KUBECONFIG: "{{ _kubeconfig }}"
+      changed_when: true
+
+    - name: Clean up values file
+      ansible.builtin.file:
+        path: /tmp/rook-cluster-values.yml
+        state: absent

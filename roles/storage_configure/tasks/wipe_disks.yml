@@ -1,0 +1,25 @@
+---
+- name: Get cluster node addresses
+  ansible.builtin.command:
+    cmd: >-
+      oc get nodes -o jsonpath='{range .items[*]}{.status.addresses[?(@.type=="InternalIP")].address}{"\n"}{end}'
+  environment:
+    KUBECONFIG: "{{ _kubeconfig }}"
+  register: _node_ips
+  changed_when: false
+
+- name: Build node list
+  ansible.builtin.set_fact:
+    _storage_nodes: "{{ _node_ips.stdout_lines | select | list }}"
+
+- name: Wipe filesystem signatures on storage devices
+  ansible.builtin.shell:
+    cmd: |
+      ssh -o StrictHostKeyChecking=no core@{{ item.0 }} \
+        "sudo wipefs -af {{ item.1 }} && sudo dd if=/dev/zero of={{ item.1 }} bs=1M count=10 conv=fsync 2>/dev/null"
+  loop: "{{ _storage_nodes | product(storage_devices) | list }}"
+  loop_control:
+    label: "{{ item.0 }}:{{ item.1 }}"
+  register: _wipe_result
+  changed_when: true
+  failed_when: _wipe_result.rc != 0

@@ -177,8 +177,8 @@
 
 ## Phase 11: Day-2 Post-Deployment Operations
 **Goal**: Automate common post-deployment tasks for production readiness.
-**Governing ADRs**: ADR-013, ADR-004
-**Status**: Planned
+**Governing ADRs**: ADR-013, ADR-004, ADR-014
+**Status**: Partial
 
 | Task ID | Task | Description | ADR | Status |
 |---------|------|-------------|-----|--------|
@@ -187,6 +187,8 @@
 | P11-03 | Post-install validation playbook | Smoke tests: node Ready, all ClusterOperators Available, console reachable, OAuth functional | 012 | Pending |
 | P11-04 | Cluster backup strategy | etcd snapshot automation, backup schedule, restore runbook | -- | Pending |
 | P11-05 | Upgrade automation | Document and optionally automate OKD version upgrades via CVO | -- | Pending |
+| P11-06 | Persistent storage configuration | Install storage backend (OpenEBS LocalPV-LVM for SNO, Rook-Ceph for HA), optional SeaweedFS S3 with external Route, disk wipe, StorageClass, verification | 014 | Done (SNO validated) |
+| P11-07 | S3 Route and auth for SeaweedFS | External S3 access via OCP Route, auto-generated S3 credentials, anonymous read support | 014 | Done (SNO validated) |
 
 ---
 
@@ -206,6 +208,7 @@ Phase 6 (Jumpbox) -- independent, can start anytime
 Phase 7 (Disconnected) -- depends on Phase 1, 3, 4
 Phase 8 (Integration) -- depends on all previous phases
 Phase 11 (Day-2 Ops) -- depends on successful deployment (Phase 8)
+  P11-01 certs, P11-06 storage -- post-deploy, independent of each other
 ```
 
 ---
@@ -225,5 +228,5 @@ Phase 11 (Day-2 Ops) -- depends on successful deployment (Phase 8)
 | 8 - Integration | 5 | 1 | 3 | 1 | 0 | Partial (SNO validated) |
 | 9 - Operational Hardening | 6 | -- | -- | -- | -- | Done |
 | 10 - BIP Boot Fix | 8 | -- | -- | -- | -- | Done |
-| 11 - Day-2 Operations | 5 | -- | -- | -- | -- | Partial |
-| **Total** | **65** | **11** | **16** | **15** | **4** | |
+| 11 - Day-2 Operations | 7 | -- | -- | -- | -- | Partial |
+| **Total** | **67** | **11** | **16** | **15** | **4** | |

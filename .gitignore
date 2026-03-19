@@ -14,6 +14,7 @@ __pycache__/
 .env
 .vault_password
 *.vault
+vault.yml
 vault_password_file
 pull-secret.json
 pull-secret.txt

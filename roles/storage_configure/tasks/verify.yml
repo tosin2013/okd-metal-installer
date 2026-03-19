@@ -1,0 +1,104 @@
+---
+- name: Determine expected StorageClass name
+  ansible.builtin.set_fact:
+    _expected_sc: "{{ openebs_sc_name if storage_backend == 'openebs-lvm' else rook_sc_name }}"
+
+- name: Verify StorageClass exists
+  ansible.builtin.command:
+    cmd: oc get storageclass {{ _expected_sc }}
+  environment:
+    KUBECONFIG: "{{ _kubeconfig }}"
+  register: _sc_verify
+  changed_when: false
+  failed_when: _sc_verify.rc != 0
+
+- name: List all StorageClasses
+  ansible.builtin.command:
+    cmd: oc get storageclass
+  environment:
+    KUBECONFIG: "{{ _kubeconfig }}"
+  register: _sc_list
+  changed_when: false
+
+- name: Display StorageClasses
+  ansible.builtin.debug:
+    msg: "{{ _sc_list.stdout }}"
+
+- name: Create test PVC
+  ansible.builtin.command:
+    cmd: oc apply -f -
+    stdin: |
+      apiVersion: v1
+      kind: PersistentVolumeClaim
+      metadata:
+        name: storage-verify-test-pvc
+        namespace: default
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        storageClassName: {{ _expected_sc }}
+        resources:
+          requests:
+            storage: 1Gi
+  environment:
+    KUBECONFIG: "{{ _kubeconfig }}"
+  register: _pvc_create
+  changed_when: "'created' in _pvc_create.stdout"
+
+- name: Create test pod to trigger PVC binding
+  ansible.builtin.command:
+    cmd: oc apply -f -
+    stdin: |
+      apiVersion: v1
+      kind: Pod
+      metadata:
+        name: storage-verify-test-pod
+        namespace: default
+      spec:
+        containers:
+          - name: test
+            image: registry.access.redhat.com/ubi9/ubi-minimal:latest
+            command: ["sleep", "30"]
+            volumeMounts:
+              - name: test-vol
+                mountPath: /data
+        volumes:
+          - name: test-vol
+            persistentVolumeClaim:
+              claimName: storage-verify-test-pvc
+        restartPolicy: Never
+  environment:
+    KUBECONFIG: "{{ _kubeconfig }}"
+  register: _pod_create
+  changed_when: "'created' in _pod_create.stdout"
+
+- name: Wait for test PVC to bind
+  ansible.builtin.command:
+    cmd: >-
+      oc get pvc storage-verify-test-pvc -n default
+      -o jsonpath='{.status.phase}'
+  environment:
+    KUBECONFIG: "{{ _kubeconfig }}"
+  register: _pvc_status
+  until: _pvc_status.stdout == "Bound"
+  retries: 30
+  delay: 10
+  changed_when: false
+
+- name: Test PVC verified
+  ansible.builtin.debug:
+    msg: "Storage verification passed -- test PVC bound successfully using {{ _expected_sc }}"
+
+- name: Clean up test pod
+  ansible.builtin.command:
+    cmd: oc delete pod storage-verify-test-pod -n default --ignore-not-found
+  environment:
+    KUBECONFIG: "{{ _kubeconfig }}"
+  changed_when: true
+
+- name: Clean up test PVC
+  ansible.builtin.command:
+    cmd: oc delete pvc storage-verify-test-pvc -n default --ignore-not-found
+  environment:
+    KUBECONFIG: "{{ _kubeconfig }}"
+  changed_when: true

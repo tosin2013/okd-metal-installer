@@ -1,0 +1,272 @@
+---
+- name: Add SeaweedFS Helm repository
+  ansible.builtin.command:
+    cmd: helm repo add seaweedfs {{ seaweedfs_helm_repo }}
+  environment:
+    KUBECONFIG: "{{ _kubeconfig }}"
+  register: _repo_add
+  changed_when: "'has been added' in _repo_add.stdout"
+  failed_when:
+    - _repo_add.rc != 0
+    - "'already exists' not in _repo_add.stderr"
+
+- name: Update Helm repositories
+  ansible.builtin.command:
+    cmd: helm repo update seaweedfs
+  environment:
+    KUBECONFIG: "{{ _kubeconfig }}"
+  changed_when: true
+
+- name: Check if SeaweedFS is already installed
+  ansible.builtin.command:
+    cmd: helm status seaweedfs -n {{ seaweedfs_namespace }}
+  environment:
+    KUBECONFIG: "{{ _kubeconfig }}"
+  register: _seaweedfs_status
+  changed_when: false
+  failed_when: false
+
+- name: Install SeaweedFS
+  when: _seaweedfs_status.rc != 0
+  block:
+    - name: Create SeaweedFS namespace
+      ansible.builtin.command:
+        cmd: oc create namespace {{ seaweedfs_namespace }}
+      environment:
+        KUBECONFIG: "{{ _kubeconfig }}"
+      register: _ns_create
+      changed_when: "'created' in _ns_create.stdout"
+      failed_when:
+        - _ns_create.rc != 0
+        - "'already exists' not in _ns_create.stderr"
+
+    - name: Label SeaweedFS namespace for privileged pod security
+      ansible.builtin.command:
+        cmd: >-
+          oc label namespace {{ seaweedfs_namespace }}
+          pod-security.kubernetes.io/enforce=privileged
+          pod-security.kubernetes.io/audit=privileged
+          pod-security.kubernetes.io/warn=privileged
+          --overwrite
+      environment:
+        KUBECONFIG: "{{ _kubeconfig }}"
+      changed_when: true
+
+    - name: Determine StorageClass for SeaweedFS PVCs
+      ansible.builtin.set_fact:
+        _seaweedfs_sc: "{{ openebs_sc_name if storage_backend == 'openebs-lvm' else rook_sc_name }}"
+
+    - name: Create SeaweedFS values file
+      ansible.builtin.copy:
+        content: |
+          master:
+            replicas: 1
+            data:
+              type: "persistentVolumeClaim"
+              size: "5Gi"
+              storageClass: "{{ _seaweedfs_sc }}"
+            logs:
+              type: "emptyDir"
+          volume:
+            replicas: 1
+            dataDirs:
+              - name: data1
+                type: "persistentVolumeClaim"
+                storageClass: "{{ _seaweedfs_sc }}"
+                size: "{{ seaweedfs_volume_size }}"
+                maxVolumes: 0
+            idx:
+              type: "persistentVolumeClaim"
+              size: "5Gi"
+              storageClass: "{{ _seaweedfs_sc }}"
+            logs:
+              type: "emptyDir"
+          filer:
+            replicas: 1
+            enablePVC: true
+            storage: 10Gi
+            storageClass: "{{ _seaweedfs_sc }}"
+            data:
+              type: "persistentVolumeClaim"
+              size: "10Gi"
+              storageClass: "{{ _seaweedfs_sc }}"
+            logs:
+              type: "emptyDir"
+            s3:
+              enabled: true
+              port: 8333
+          s3:
+            enabled: true
+            replicas: 1
+            data:
+              type: "emptyDir"
+            logs:
+              type: "emptyDir"
+        dest: /tmp/seaweedfs-values.yml
+        mode: "0644"
+
+    - name: Install SeaweedFS via Helm
+      ansible.builtin.command:
+        cmd: >-
+          helm install seaweedfs {{ seaweedfs_helm_chart }}
+          --namespace {{ seaweedfs_namespace }}
+          --values /tmp/seaweedfs-values.yml
+          --timeout {{ storage_operator_wait_timeout }}s
+      environment:
+        KUBECONFIG: "{{ _kubeconfig }}"
+      changed_when: true
+
+    - name: Generate S3 access key if not provided
+      ansible.builtin.set_fact:
+        _s3_access_key: "{{ seaweedfs_s3_access_key | default('', true) | ternary(seaweedfs_s3_access_key, lookup('community.general.random_string', length=32, override_special='', override_all='0123456789abcdef')) }}"
+        _s3_secret_key: "{{ seaweedfs_s3_secret_key | default('', true) | ternary(seaweedfs_s3_secret_key, lookup('community.general.random_string', length=64, override_special='', override_all='0123456789abcdef')) }}"
+
+    - name: Build S3 identity list
+      ansible.builtin.set_fact:
+        _s3_identities: >-
+          {{ [{'name': 'admin', 'credentials': [{'accessKey': _s3_access_key, 'secretKey': _s3_secret_key}], 'actions': ['Admin','Read','Write','List','Tagging']}]
+             + ([{'name': 'anonymous', 'actions': ['Read','List']}] if seaweedfs_s3_anonymous_read | default(true) | bool else []) }}
+
+    - name: Create S3 auth config secret
+      ansible.builtin.command:
+        cmd: oc apply -f -
+        stdin: |
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: seaweedfs-s3-config
+            namespace: {{ seaweedfs_namespace }}
+          type: Opaque
+          stringData:
+            s3.json: '{{ {"identities": _s3_identities} | to_json }}'
+      environment:
+        KUBECONFIG: "{{ _kubeconfig }}"
+      changed_when: true
+
+    - name: Patch S3 deployment to mount config and use -config flag
+      ansible.builtin.command:
+        cmd: >-
+          oc patch deployment seaweedfs-s3 -n {{ seaweedfs_namespace }}
+          --type=json
+          -p=[{"op":"add","path":"/spec/template/spec/volumes/-","value":{"name":"s3-config","secret":{"secretName":"seaweedfs-s3-config"}}},{"op":"add","path":"/spec/template/spec/containers/0/volumeMounts/-","value":{"name":"s3-config","mountPath":"/etc/seaweedfs-s3","readOnly":true}},{"op":"replace","path":"/spec/template/spec/containers/0/command","value":["/bin/sh","-ec","exec /usr/bin/weed -logdir=/logs -v=1 s3 -ip.bind=0.0.0.0 -port=8333 -metricsPort 9327 -filer=seaweedfs-filer-client.seaweedfs:8888 -config=/etc/seaweedfs-s3/s3.json\n"]}]
+      environment:
+        KUBECONFIG: "{{ _kubeconfig }}"
+      changed_when: true
+
+    - name: Add SeaweedFS service accounts to privileged SCC
+      ansible.builtin.shell:
+        cmd: |
+          for sa in $(oc get sa -n {{ seaweedfs_namespace }} --no-headers -o custom-columns=NAME:.metadata.name); do
+            oc adm policy add-scc-to-user privileged system:serviceaccount:{{ seaweedfs_namespace }}:$sa 2>/dev/null
+          done
+      environment:
+        KUBECONFIG: "{{ _kubeconfig }}"
+      changed_when: true
+
+    - name: Restart SeaweedFS workloads to pick up SCC and config changes
+      ansible.builtin.shell:
+        cmd: |
+          oc rollout restart statefulset -n {{ seaweedfs_namespace }} 2>/dev/null || true
+          oc rollout restart deployment -n {{ seaweedfs_namespace }} 2>/dev/null || true
+      environment:
+        KUBECONFIG: "{{ _kubeconfig }}"
+      changed_when: true
+
+    - name: Store S3 credentials in cluster secret for consumers
+      ansible.builtin.command:
+        cmd: oc apply -f -
+        stdin: |
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: seaweedfs-s3-credentials
+            namespace: {{ seaweedfs_namespace }}
+            labels:
+              app.kubernetes.io/part-of: seaweedfs
+          type: Opaque
+          stringData:
+            AWS_ACCESS_KEY_ID: "{{ _s3_access_key }}"
+            AWS_SECRET_ACCESS_KEY: "{{ _s3_secret_key }}"
+      environment:
+        KUBECONFIG: "{{ _kubeconfig }}"
+      changed_when: true
+
+    - name: Clean up values file
+      ansible.builtin.file:
+        path: /tmp/seaweedfs-values.yml
+        state: absent
+
+- name: Wait for SeaweedFS master to be ready
+  ansible.builtin.command:
+    cmd: >-
+      oc rollout status statefulset/seaweedfs-master
+      -n {{ seaweedfs_namespace }}
+      --timeout={{ storage_operator_wait_timeout }}s
+  environment:
+    KUBECONFIG: "{{ _kubeconfig }}"
+  changed_when: false
+
+- name: Wait for SeaweedFS filer to be ready
+  ansible.builtin.command:
+    cmd: >-
+      oc rollout status statefulset/seaweedfs-filer
+      -n {{ seaweedfs_namespace }}
+      --timeout={{ storage_operator_wait_timeout }}s
+  environment:
+    KUBECONFIG: "{{ _kubeconfig }}"
+  changed_when: false
+
+- name: Create S3 Route for external access
+  when: seaweedfs_expose_route | default(true) | bool
+  block:
+    - name: Get cluster apps domain
+      ansible.builtin.command:
+        cmd: oc get ingresses.config.openshift.io cluster -o jsonpath='{.spec.domain}'
+      environment:
+        KUBECONFIG: "{{ _kubeconfig }}"
+      register: _apps_domain
+      changed_when: false
+
+    - name: Set S3 Route hostname
+      ansible.builtin.set_fact:
+        _s3_hostname: "{{ seaweedfs_route_hostname | default('', true) | ternary(seaweedfs_route_hostname, 's3.' + _apps_domain.stdout) }}"
+
+    - name: Apply S3 Route
+      ansible.builtin.command:
+        cmd: oc apply -f -
+        stdin: |
+          apiVersion: route.openshift.io/v1
+          kind: Route
+          metadata:
+            name: seaweedfs-s3
+            namespace: {{ seaweedfs_namespace }}
+          spec:
+            host: {{ _s3_hostname }}
+            to:
+              kind: Service
+              name: seaweedfs-s3
+              weight: 100
+            port:
+              targetPort: 8333
+            tls:
+              termination: edge
+              insecureEdgeTerminationPolicy: Redirect
+      environment:
+        KUBECONFIG: "{{ _kubeconfig }}"
+      register: _route_result
+      changed_when: "'created' in _route_result.stdout"
+
+    - name: Get S3 Route URL
+      ansible.builtin.command:
+        cmd: oc get route seaweedfs-s3 -n {{ seaweedfs_namespace }} -o jsonpath='{.spec.host}'
+      environment:
+        KUBECONFIG: "{{ _kubeconfig }}"
+      register: _route_host
+      changed_when: false
+
+- name: Display SeaweedFS S3 endpoints
+  ansible.builtin.debug:
+    msg: >-
+      SeaweedFS S3 internal: seaweedfs-s3.{{ seaweedfs_namespace }}.svc:8333 |
+      External: https://{{ _route_host.stdout | default(_s3_hostname | default('not exposed')) }}/ |
+      Credentials secret: {{ seaweedfs_namespace }}/seaweedfs-s3-credentials

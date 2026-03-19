@@ -1,0 +1,50 @@
+---
+- name: Get cluster node addresses for VG setup
+  ansible.builtin.command:
+    cmd: >-
+      oc get nodes -o jsonpath='{range .items[*]}{.status.addresses[?(@.type=="InternalIP")].address}{"\n"}{end}'
+  environment:
+    KUBECONFIG: "{{ _kubeconfig }}"
+  register: _node_ips
+  changed_when: false
+
+- name: Build node list for VG creation
+  ansible.builtin.set_fact:
+    _vg_nodes: "{{ _node_ips.stdout_lines | select | list }}"
+
+- name: Create LVM volume group on each node
+  ansible.builtin.shell:
+    cmd: |
+      ssh -o StrictHostKeyChecking=no core@{{ item }} \
+        "sudo vgdisplay {{ openebs_vg_name }} 2>/dev/null || \
+         sudo pvcreate {{ storage_devices | join(' ') }} && \
+         sudo vgcreate {{ openebs_vg_name }} {{ storage_devices | join(' ') }}"
+  loop: "{{ _vg_nodes }}"
+  loop_control:
+    label: "{{ item }}"
+  register: _vg_result
+  changed_when: "'Volume group' not in _vg_result.stdout"
+  failed_when:
+    - _vg_result.rc != 0
+    - "'already exists' not in _vg_result.stderr"
+
+- name: Apply OpenEBS LVM StorageClass
+  ansible.builtin.command:
+    cmd: oc apply -f -
+    stdin: |
+      apiVersion: storage.k8s.io/v1
+      kind: StorageClass
+      metadata:
+        name: {{ openebs_sc_name }}
+        annotations:
+          storageclass.kubernetes.io/is-default-class: "{{ storage_default_class | string | lower }}"
+      provisioner: local.csi.openebs.io
+      allowVolumeExpansion: true
+      parameters:
+        storage: "lvm"
+        volgroup: "{{ openebs_vg_name }}"
+      volumeBindingMode: WaitForFirstConsumer
+  environment:
+    KUBECONFIG: "{{ _kubeconfig }}"
+  register: _sc_result
+  changed_when: "'created' in _sc_result.stdout"

@@ -1,0 +1,83 @@
+---
+- name: Set KUBECONFIG for oc/helm commands
+  ansible.builtin.set_fact:
+    _kubeconfig: "{{ ignition_output_dir }}/auth/kubeconfig"
+
+- name: Verify cluster is accessible
+  ansible.builtin.command:
+    cmd: oc get clusterversion
+  environment:
+    KUBECONFIG: "{{ _kubeconfig }}"
+  register: _cluster_check
+  changed_when: false
+  failed_when: _cluster_check.rc != 0
+
+- name: Validate storage_devices is configured
+  ansible.builtin.assert:
+    that:
+      - storage_devices | length > 0
+    fail_msg: >-
+      storage_devices is empty. You must explicitly list the disks to use
+      for storage in your inventory (group_vars or host_vars).
+      Example: storage_devices: ["/dev/nvme1n1"]
+
+- name: Validate storage_backend value
+  ansible.builtin.assert:
+    that:
+      - storage_backend in ['openebs-lvm', 'rook-ceph']
+    fail_msg: >-
+      storage_backend must be 'openebs-lvm' or 'rook-ceph',
+      got '{{ storage_backend }}'
+
+- name: Ensure Helm is installed
+  ansible.builtin.command:
+    cmd: helm version --short
+  register: _helm_check
+  changed_when: false
+  failed_when: _helm_check.rc != 0
+  ignore_errors: true
+
+- name: Install Helm if not present
+  when: _helm_check.rc != 0
+  block:
+    - name: Download Helm install script
+      ansible.builtin.get_url:
+        url: https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
+        dest: /tmp/get_helm.sh
+        mode: "0755"
+
+    - name: Run Helm install script
+      ansible.builtin.command:
+        cmd: /tmp/get_helm.sh
+      changed_when: true
+
+- name: Wipe disk signatures
+  ansible.builtin.include_tasks: wipe_disks.yml
+  when: storage_wipe_disks | bool
+
+- name: Install and configure OpenEBS LocalPV-LVM
+  when: storage_backend == 'openebs-lvm'
+  block:
+    - name: Install OpenEBS operator
+      ansible.builtin.include_tasks: install_openebs.yml
+
+    - name: Configure OpenEBS storage
+      ansible.builtin.include_tasks: configure_openebs.yml
+
+- name: Install and configure Rook-Ceph
+  when: storage_backend == 'rook-ceph'
+  block:
+    - name: Install Rook-Ceph operator and cluster
+      ansible.builtin.include_tasks: install_rook.yml
+
+    - name: Configure Rook-Ceph storage
+      ansible.builtin.include_tasks: configure_rook.yml
+
+- name: Install SeaweedFS for S3 object storage
+  ansible.builtin.include_tasks: install_seaweedfs.yml
+  when:
+    - storage_s3_enabled | bool
+    - storage_backend == 'openebs-lvm'
+
+- name: Verify storage deployment
+  ansible.builtin.include_tasks: verify.yml

@@ -1,0 +1,41 @@
+---
+storage_enabled: true
+storage_backend: openebs-lvm       # 'openebs-lvm' or 'rook-ceph'
+storage_wipe_disks: true
+storage_devices: []                # REQUIRED -- must be set in inventory
+storage_default_class: true
+
+# OpenEBS LocalPV-LVM (SNO)
+openebs_helm_repo: https://openebs.github.io/openebs
+openebs_helm_chart: openebs/openebs
+openebs_helm_version: ""
+openebs_namespace: openebs
+openebs_vg_name: vg1
+openebs_sc_name: "openebs-lvmpv-{{ openebs_vg_name }}"
+
+# Rook-Ceph (HA 3+ nodes)
+rook_helm_repo: https://charts.rook.io/release
+rook_helm_operator_chart: rook-release/rook-ceph
+rook_helm_cluster_chart: rook-release/rook-ceph-cluster
+rook_helm_version: ""
+rook_namespace: rook-ceph
+rook_ceph_replica_count: 3
+rook_enable_cephfs: true
+rook_enable_rgw: false
+rook_sc_name: ceph-block
+
+# SeaweedFS S3 (optional)
+storage_s3_enabled: false
+seaweedfs_helm_repo: https://seaweedfs.github.io/seaweedfs/helm
+seaweedfs_helm_chart: seaweedfs/seaweedfs
+seaweedfs_namespace: seaweedfs
+seaweedfs_volume_size: "50Gi"
+seaweedfs_expose_route: true
+seaweedfs_route_hostname: ""        # auto-derived as s3.<apps_domain> if empty
+seaweedfs_s3_access_key: ""         # auto-generated if empty
+seaweedfs_s3_secret_key: ""         # auto-generated if empty
+seaweedfs_s3_anonymous_read: true   # allow anonymous Read + List
+
+# Shared
+storage_operator_wait_timeout: 300
+ignition_output_dir: "{{ playbook_dir }}/../ignition-output"

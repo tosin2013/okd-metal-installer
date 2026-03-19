@@ -1,0 +1,108 @@
+---
+- name: Add OpenEBS Helm repository
+  ansible.builtin.command:
+    cmd: helm repo add openebs {{ openebs_helm_repo }}
+  environment:
+    KUBECONFIG: "{{ _kubeconfig }}"
+  register: _repo_add
+  changed_when: "'has been added' in _repo_add.stdout"
+  failed_when:
+    - _repo_add.rc != 0
+    - "'already exists' not in _repo_add.stderr"
+
+- name: Update Helm repositories
+  ansible.builtin.command:
+    cmd: helm repo update
+  environment:
+    KUBECONFIG: "{{ _kubeconfig }}"
+  changed_when: true
+
+- name: Check if OpenEBS is already installed
+  ansible.builtin.command:
+    cmd: helm status openebs -n {{ openebs_namespace }}
+  environment:
+    KUBECONFIG: "{{ _kubeconfig }}"
+  register: _openebs_status
+  changed_when: false
+  failed_when: false
+
+- name: Install OpenEBS
+  when: _openebs_status.rc != 0
+  block:
+    - name: Create openebs namespace
+      ansible.builtin.command:
+        cmd: oc create namespace {{ openebs_namespace }}
+      environment:
+        KUBECONFIG: "{{ _kubeconfig }}"
+      register: _ns_create
+      changed_when: "'created' in _ns_create.stdout"
+      failed_when:
+        - _ns_create.rc != 0
+        - "'already exists' not in _ns_create.stderr"
+
+    - name: Label namespace for privileged pod security
+      ansible.builtin.command:
+        cmd: >-
+          oc label namespace {{ openebs_namespace }}
+          pod-security.kubernetes.io/enforce=privileged
+          pod-security.kubernetes.io/audit=privileged
+          pod-security.kubernetes.io/warn=privileged
+          --overwrite
+      environment:
+        KUBECONFIG: "{{ _kubeconfig }}"
+      changed_when: true
+
+    - name: Install OpenEBS via Helm (without --wait)
+      ansible.builtin.command:
+        cmd: >-
+          helm install openebs {{ openebs_helm_chart }}
+          --namespace {{ openebs_namespace }}
+          --set openebs-crds.csi.volumeSnapshots.enabled=false
+          --set engines.local.lvm.enabled=true
+          --set engines.local.zfs.enabled=false
+          --set engines.local.rawfile.enabled=false
+          --set engines.replicated.mayastor.enabled=false
+          --set loki.enabled=false
+          --set alloy.enabled=false
+          {% if openebs_helm_version %}--version {{ openebs_helm_version }}{% endif %}
+      environment:
+        KUBECONFIG: "{{ _kubeconfig }}"
+      changed_when: true
+
+    - name: Add OpenEBS service accounts to privileged SCC
+      ansible.builtin.command:
+        cmd: >-
+          oc adm policy add-scc-to-user privileged
+          system:serviceaccount:{{ openebs_namespace }}:{{ item }}
+      environment:
+        KUBECONFIG: "{{ _kubeconfig }}"
+      loop:
+        - openebs-lvm-node-sa
+        - openebs-lvm-controller-sa
+        - openebs-localpv-provisioner
+      changed_when: true
+      failed_when: false
+
+    - name: Restart DaemonSet to pick up SCC changes
+      ansible.builtin.command:
+        cmd: oc rollout restart ds/openebs-lvm-localpv-node -n {{ openebs_namespace }}
+      environment:
+        KUBECONFIG: "{{ _kubeconfig }}"
+      changed_when: true
+
+- name: Wait for OpenEBS LVM controller to be ready
+  ansible.builtin.command:
+    cmd: >-
+      oc rollout status deployment/openebs-lvm-localpv-controller
+      -n {{ openebs_namespace }}
+      --timeout={{ storage_operator_wait_timeout }}s
+  environment:
+    KUBECONFIG: "{{ _kubeconfig }}"
+  changed_when: false
+
+- name: Wait for OpenEBS LVM node DaemonSet to be ready
+  ansible.builtin.command:
+    cmd: oc rollout status ds/openebs-lvm-localpv-node -n {{ openebs_namespace }} --timeout={{ storage_operator_wait_timeout }}s
+  environment:
+    KUBECONFIG: "{{ _kubeconfig }}"
+  changed_when: false

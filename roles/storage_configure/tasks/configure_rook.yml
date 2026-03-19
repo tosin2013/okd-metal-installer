@@ -1,0 +1,50 @@
+---
+- name: Wait for CephCluster to be healthy
+  ansible.builtin.command:
+    cmd: >-
+      oc get cephcluster -n {{ rook_namespace }}
+      -o jsonpath='{.items[0].status.ceph.health}'
+  environment:
+    KUBECONFIG: "{{ _kubeconfig }}"
+  register: _ceph_health
+  until: _ceph_health.stdout == "HEALTH_OK" or _ceph_health.stdout == "HEALTH_WARN"
+  retries: "{{ (storage_operator_wait_timeout | int / 10) | int }}"
+  delay: 10
+  changed_when: false
+
+- name: Display Ceph cluster health
+  ansible.builtin.debug:
+    msg: "Ceph cluster health: {{ _ceph_health.stdout }}"
+
+- name: Verify Rook StorageClass exists
+  ansible.builtin.command:
+    cmd: oc get storageclass {{ rook_sc_name }}
+  environment:
+    KUBECONFIG: "{{ _kubeconfig }}"
+  register: _sc_check
+  changed_when: false
+  failed_when: _sc_check.rc != 0
+
+- name: Verify CephFS StorageClass exists
+  ansible.builtin.command:
+    cmd: oc get storageclass ceph-filesystem
+  environment:
+    KUBECONFIG: "{{ _kubeconfig }}"
+  register: _cephfs_check
+  changed_when: false
+  failed_when: _cephfs_check.rc != 0
+  when: rook_enable_cephfs | bool
+
+- name: Verify Ceph Object Store is ready
+  ansible.builtin.command:
+    cmd: >-
+      oc get cephobjectstore ceph-objectstore -n {{ rook_namespace }}
+      -o jsonpath='{.status.phase}'
+  environment:
+    KUBECONFIG: "{{ _kubeconfig }}"
+  register: _rgw_status
+  until: _rgw_status.stdout == "Ready"
+  retries: "{{ (storage_operator_wait_timeout | int / 10) | int }}"
+  delay: 10
+  changed_when: false
+  when: rook_enable_rgw | bool

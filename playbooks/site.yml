@@ -12,6 +12,7 @@
 #   --tags boot            Phase 6: boot delivery
 #   --tags monitor         Phase 7: bootstrap monitoring + validation
 #   --tags certs           Phase 8: TLS certificates (cert-manager + Let's Encrypt)
+#   --tags storage         Phase 9: persistent storage (OpenEBS / Rook-Ceph / SeaweedFS)
 #
 # Phases executed (when no tags specified, all run in order):
 #   0. Disconnected preparation -- mirror registry + release mirror (if disconnected)
@@ -24,6 +25,7 @@
 #   7. Boot delivery to target nodes (manual, Redfish, or Hetzner)
 #   8. Bootstrap monitoring and cluster validation (on jumpbox)
 #   9. TLS certificate automation via cert-manager + Let's Encrypt (on jumpbox)
+#  10. Persistent storage provisioning (on jumpbox)
 
 - name: "Phase 0: Disconnected preparation (mirror registry + release mirror)"
   hosts: localhost
@@ -118,3 +120,13 @@
   roles:
     - role: cert_manager
       when: certmanager_enabled | default(true) | bool
+
+- name: "Phase 9: Configure persistent storage"
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  become: false
+  tags: [storage]
+  roles:
+    - role: storage_configure
+      when: storage_enabled | default(true) | bool
