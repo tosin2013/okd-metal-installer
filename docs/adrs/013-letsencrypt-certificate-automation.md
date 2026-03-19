@@ -104,7 +104,7 @@ spec:
     - dns01:
         route53:
           region: eu-central-1
-          hostedZoneID: Z04957801CD6ZAE7L5S0E
+          hostedZoneID: <YOUR_ROUTE53_ZONE_ID>
           accessKeyIDSecretRef:
             name: aws-route53-credentials
             key: access-key-id

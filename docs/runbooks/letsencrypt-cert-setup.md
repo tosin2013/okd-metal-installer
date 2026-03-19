@@ -16,7 +16,7 @@
   export KUBECONFIG=/root/okd-metal-installer/ignition-output/auth/kubeconfig
   ```
 - AWS credentials with Route 53 permissions (same credentials used for DNS setup)
-- Route 53 hosted zone ID (from `inventory/sno-prod/group_vars/all.yml`: `Z04957801CD6ZAE7L5S0E`)
+- Route 53 hosted zone ID (from `inventory/sno-prod/group_vars/all.yml`)
 
 ## Step 1: Install cert-manager Operator
 
@@ -107,7 +107,7 @@ spec:
     - dns01:
         route53:
           region: eu-central-1
-          hostedZoneID: Z04957801CD6ZAE7L5S0E
+          hostedZoneID: <YOUR_ROUTE53_ZONE_ID>
           accessKeyIDSecretRef:
             name: aws-route53-credentials
             key: access-key-id
@@ -179,7 +179,7 @@ spec:
     - dns01:
         route53:
           region: eu-central-1
-          hostedZoneID: Z04957801CD6ZAE7L5S0E
+          hostedZoneID: <YOUR_ROUTE53_ZONE_ID>
           accessKeyIDSecretRef:
             name: aws-route53-credentials
             key: access-key-id
