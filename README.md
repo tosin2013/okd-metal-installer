@@ -1,5 +1,8 @@
 # OKD-Metal Installer
 
+[![License](https://img.shields.io/github/license/tosin2013/okd-metal-installer)](LICENSE)
+[![Lint](https://github.com/tosin2013/okd-metal-installer/actions/workflows/lint.yml/badge.svg?branch=main)](https://github.com/tosin2013/okd-metal-installer/actions/workflows/lint.yml?query=branch%3Amain)
+
 Ansible-driven bare-metal provisioning for [OKD](https://www.okd.io/) (community Kubernetes distribution derived from OpenShift). OKD-Metal automates the full lifecycle of deploying OKD clusters on physical servers -- from Ignition config generation and custom ISO creation to DNS registration and network configuration.
 
 ## Key Features
@@ -60,7 +63,7 @@ okd-metal-installer/
 │   ├── install-config.yaml.j2  # OKD install-config template
 │   └── nmconnection-*.j2       # NetworkManager connection templates
 ├── docs/
-│   ├── adrs/                   # Architectural Decision Records (001-011)
+│   ├── adrs/                   # Architectural Decision Records (001-014)
 │   ├── aws-iam-policy.json     # Minimum IAM policy for Route 53 DNS
 │   └── implementation-backlog.md
 └── rules/
@@ -177,6 +180,9 @@ Per-host variables (in `host_vars/<hostname>.yml`):
 | [009](docs/adrs/009-disconnected-airgapped-installation-support.md) | Disconnected/Air-Gapped Installation Support |
 | [010](docs/adrs/010-ignition-configuration-generation.md) | Ignition Configuration Generation |
 | [011](docs/adrs/011-boot-delivery-strategy.md) | Boot Delivery Strategy (Manual + Redfish) |
+| [012](docs/adrs/012-bootstrap-monitoring-strategy.md) | Bootstrap Monitoring Strategy |
+| [013](docs/adrs/013-letsencrypt-certificate-automation.md) | Let's Encrypt Certificate Automation |
+| [014](docs/adrs/014-persistent-storage-strategy.md) | Persistent Storage Strategy |
 
 ## Implementation Roadmap
 
@@ -195,6 +201,12 @@ The MVP implementation is tracked in a [phased backlog](docs/implementation-back
 - Boot Delivery (ADR-011) -- complete
 - All phases complete (MVP)
 
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) and the [Code of Conduct](CODE_OF_CONDUCT.md).
+
+For GitHub-only steps (topics, social preview, Discussions, releases), see [docs/github-repository-setup.md](docs/github-repository-setup.md).
+
 ## License
 
-Apache License 2.0
+Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE).

@@ -1,5 +1,5 @@
 ---
-- name: Request wildcard certificate for *.apps.{{ cluster_name }}.{{ base_domain }}
+- name: Request wildcard certificate for apps ingress (DNS wildcard)
   ansible.builtin.command:
     cmd: oc apply -f -
     stdin: "{{ lookup('template', 'certificate-apps.yml.j2') }}"
