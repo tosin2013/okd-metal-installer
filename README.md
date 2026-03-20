@@ -22,7 +22,32 @@ Ansible-driven bare-metal provisioning for [OKD](https://www.okd.io/) (community
 
 All provisioning workflows are implemented as Ansible playbooks and roles (see [ADR-001](docs/adrs/001-use-ansible-as-primary-automation-framework.md)). There is no standalone API service -- Ansible inventory files and `group_vars`/`host_vars` define the cluster topology declaratively.
 
-Full architectural decisions are documented in 11 ADRs under [`docs/adrs/`](docs/adrs/).
+Full architectural decisions are documented in 14 ADRs under [`docs/adrs/`](docs/adrs/).
+
+### Overview
+
+The flow below is high-level: declarative inventory drives Ansible, which produces Ignition and custom ISOs, exposes them over HTTP alongside DNS updates, then completes boot delivery (manual ISO or Redfish) until bare-metal nodes join as an OKD cluster (Bootstrap-in-Place).
+
+```mermaid
+flowchart TB
+  decl[Declarative_inventory_and_vars]
+  ansible[Ansible_playbooks_and_roles]
+  artifacts[Ignition_and_custom_ISO]
+  serve[nginx_config_HTTP]
+  dns[DNS_Route53_or_internal]
+  boot[Boot_delivery_manual_or_Redfish]
+  nodes[Bare_metal_servers]
+  okd[OKD_cluster]
+  decl --> ansible
+  ansible --> artifacts
+  ansible --> serve
+  ansible --> dns
+  artifacts --> serve
+  serve --> boot
+  dns --> boot
+  boot --> nodes
+  nodes --> okd
+```
 
 ## Project Structure
 
